@@ -20,14 +20,12 @@
  */
 
 #include "defs.h"
-#include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 static void pr_do(FILE *stream,
-                  const char *label,
-                  const char *fmt,
-                  va_list ap);
+    const char *label,
+    const char *fmt,
+    va_list ap);
 
 void *xmalloc(size_t size) {
   void *ptr;
@@ -63,9 +61,9 @@ void pr_err(const char *fmt, ...) {
 }
 
 static void pr_do(FILE *stream,
-                  const char *label,
-                  const char *fmt,
-                  va_list ap) {
+    const char *label,
+    const char *fmt,
+    va_list ap) {
   char fmtbuf[1024];
   vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
   fprintf(stream, "%s:%s: %s\n", _getprogname(), label, fmtbuf);

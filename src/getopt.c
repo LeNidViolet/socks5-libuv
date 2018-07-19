@@ -34,7 +34,6 @@ static char sccsid[] = "@(#)getopt.c	8.3 (Berkeley) 4/27/95";
 #endif /* LIBC_SCCS and not lint */
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -57,8 +56,8 @@ char	*optarg;		/* argument associated with option */
 int
 getopt(nargc, nargv, ostr)
 	int nargc;
-	char * const nargv[];
-	const char *ostr;
+		char * const nargv[];
+		const char *ostr;
 {
 	static char *place = EMSG;		/* option letter processing */
 	char *oli;				/* option letter list index */
@@ -95,8 +94,8 @@ getopt(nargc, nargv, ostr)
 			++optind;
 		if (opterr && *ostr != ':')
 			(void)fprintf(stderr,
-			    "%s: illegal option -- %c\n", _getprogname(),
-			    optopt);
+						  "%s: illegal option -- %c\n", _getprogname(),
+						  optopt);
 		return (BADCH);
 	}
 
@@ -120,8 +119,8 @@ getopt(nargc, nargv, ostr)
 				return (BADARG);
 			if (opterr)
 				(void)fprintf(stderr,
-				    "%s: option requires an argument -- %c\n",
-				    _getprogname(), optopt);
+							  "%s: option requires an argument -- %c\n",
+							  _getprogname(), optopt);
 			return (BADCH);
 		}
 		place = EMSG;
