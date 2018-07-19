@@ -133,11 +133,11 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
 
         if (ai->ai_family == AF_INET) {
             s.addr4 = *(const struct sockaddr_in *) ai->ai_addr;
-            s.addr4.sin_port = htons(cf->bind_port);
+            s.addr4.sin_port = htons_u(cf->bind_port);
             addrv = &s.addr4.sin_addr;
         } else if (ai->ai_family == AF_INET6) {
             s.addr6 = *(const struct sockaddr_in6 *) ai->ai_addr;
-            s.addr6.sin6_port = htons(cf->bind_port);
+            s.addr6.sin6_port = htons_u(cf->bind_port);
             addrv = &s.addr6.sin6_addr;
         } else {
             UNREACHABLE();
@@ -150,6 +150,9 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
         sx = state->servers + n;
         sx->loop = loop;
         sx->idle_timeout = state->config.idle_timeout;
+        sx->username = cf->username ? cf->username : NULL;
+        sx->password = cf->password ? cf->password : NULL;
+        sx->auth_none = cf->auth_none;
         CHECK(0 == uv_tcp_init(loop, &sx->tcp_handle));
 
         what = "uv_tcp_bind";
@@ -192,15 +195,13 @@ static void on_connection(uv_stream_t *server, int status) {
 }
 
 int can_auth_none(const server_ctx *sx, const client_ctx *cx) {
-    (void)sx;
     (void)cx;
-    return 1;
+    return sx->auth_none;
 }
 
 int can_auth_passwd(const server_ctx *sx, const client_ctx *cx) {
-    (void)sx;
     (void)cx;
-    return 0;
+    return (sx->username && sx->password);
 }
 
 int can_access(const server_ctx *sx,
@@ -222,21 +223,21 @@ int can_access(const server_ctx *sx,
      */
     if (addr->sa_family == AF_INET) {
         addr4 = (const struct sockaddr_in *) addr;
-        d = ntohl(addr4->sin_addr.s_addr);
+        d = ntohl_u(addr4->sin_addr.s_addr);
         return (d >> 24u) != 0x7F;
     }
 
     if (addr->sa_family == AF_INET6) {
         addr6 = (const struct sockaddr_in6 *) addr;
         p = (const uint32_t *) &addr6->sin6_addr.s6_addr;
-        a = ntohl(p[0]);
-        b = ntohl(p[1]);
-        c = ntohl(p[2]);
-        d = ntohl(p[3]);
+        a = ntohl_u(p[0]);
+        b = ntohl_u(p[1]);
+        c = ntohl_u(p[2]);
+        d = ntohl_u(p[3]);
         if (a == 0 && b == 0 && c == 0 && d == 1) {
             return 0;  /* "::1" style address. */
         }
-        if (a == 0 && b == 0 && c == 0xFFFF && (d >> 24) == 0x7F) {
+        if (a == 0 && b == 0 && c == 0xFFFF && (d >> 24u) == 0x7F) {
             return 0;  /* "::ffff:127.x.x.x" style address. */
         }
         return 1;

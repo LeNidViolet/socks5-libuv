@@ -44,6 +44,9 @@ int main(int argc, char **argv) {
     config.bind_host = DEFAULT_BIND_HOST;
     config.bind_port = DEFAULT_BIND_PORT;
     config.idle_timeout = DEFAULT_IDLE_TIMEOUT;
+    config.auth_none = 1;
+    config.username = NULL;
+    config.password = NULL;
     parse_opts(&config, argc, argv);
 
     err = server_run(&config, uv_default_loop());
@@ -60,8 +63,10 @@ const char *_getprogname(void) {
 
 static void parse_opts(server_config *cf, int argc, char **argv) {
     int opt;
+    static char username[256];
+    static char password[256];
 
-    while (-1 != (opt = getopt(argc, argv, "b:hp:"))) {
+    while (-1 != (opt = getopt(argc, argv, "b:hp:u:w:"))) {
         switch (opt) {
         case 'b':
             cf->bind_host = optarg;
@@ -74,16 +79,45 @@ static void parse_opts(server_config *cf, int argc, char **argv) {
             }
             break;
 
+        case 'u':
+            memset(username, 0, sizeof(username));
+            if ( strlen(optarg) >= sizeof(username) ) {
+                pr_err("user name too long (max 255) %s", optarg);
+                usage();
+            }
+            else
+            {
+                sprintf(username, "%s", optarg);
+                cf->username = username;
+            }
+            break;
+
+        case 'w':
+            memset(password, 0, sizeof(password));
+            if ( strlen(optarg) >= sizeof(password) ) {
+                pr_err("password too long (max 255) %s", optarg);
+                usage();
+            }
+            else
+            {
+                sprintf(password, "%s", optarg);
+                cf->password = password;
+            }
+            break;
+
         default:
             usage();
         }
     }
+
+    if ( cf->username && cf->password )
+        cf->auth_none = 0;
 }
 
 static void usage(void) {
     printf("Usage:\n"
            "\n"
-           "  %s [-b <address>] [-h] [-p <port>]\n"
+           "  %s [-b <address>] [-h] [-p <port>] [-u <username>] [-w <password>]\n"
            "\n"
            "Options:\n"
            "\n"
@@ -91,6 +125,10 @@ static void usage(void) {
            "                         Default: \"127.0.0.1\"\n"
            "  -h                     Show this help message.\n"
            "  -p <port>              Bind to this port number.  Default: 1080\n"
+           "  -u <username>          User name to connect to this proxy.\n"
+           "  -w <password>          Password to connect to this proxy.\n"
+           "\n"
+           "  If neither username nor password is provided, proxy do not need authenticate."
            "",
            progname);
     exit(1);

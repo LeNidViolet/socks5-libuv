@@ -38,7 +38,7 @@ typedef enum {
 #define S5_ERR_GEN(code, name, _) s5_ ## name = (code),
     S5_ERR_MAP(S5_ERR_GEN)
 #undef S5_ERR_GEN
-    s5_max_errors
+//    s5_max_errors
 } s5_err;
 
 typedef enum {

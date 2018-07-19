@@ -63,6 +63,7 @@ enum conn_state {
 /* Session states. */
 enum sess_state {
     s_handshake,        /* Wait for client handshake. */
+    s_auth_start,       /* Start auth username password */
     s_handshake_auth,   /* Wait for client authentication data. */
     s_req_start,        /* Start waiting for request data. */
     s_req_parse,        /* Wait for request data. */
@@ -83,6 +84,7 @@ enum sess_state {
 
 static void do_next(client_ctx *cx);
 static int do_handshake(client_ctx *cx);
+static int do_auth_start(client_ctx *cx);
 static int do_handshake_auth(client_ctx *cx);
 static int do_req_start(client_ctx *cx);
 static int do_req_parse(client_ctx *cx);
@@ -154,6 +156,9 @@ static void do_next(client_ctx *cx) {
     switch (cx->state) {
     case s_handshake:
         new_state = do_handshake(cx);
+        break;
+    case s_auth_start:
+        new_state = do_auth_start(cx);
         break;
     case s_handshake_auth:
         new_state = do_handshake_auth(cx);
@@ -241,24 +246,92 @@ static int do_handshake(client_ctx *cx) {
     }
 
     methods = s5_auth_methods(parser);
-    if ((methods & S5_AUTH_NONE) && can_auth_none(cx->sx, cx)) {
+
+    if ((methods & (unsigned int)S5_AUTH_NONE) && can_auth_none(cx->sx, cx)) {
         s5_select_auth(parser, S5_AUTH_NONE);
         conn_write(incoming, "\5\0", 2);  /* No auth required. */
         return s_req_start;
     }
 
-    if ((methods & S5_AUTH_PASSWD) && can_auth_passwd(cx->sx, cx)) {
-        /* TODO(bnoordhuis) Implement username/password auth. */
+    if ((methods & (unsigned int)S5_AUTH_PASSWD) && can_auth_passwd(cx->sx, cx)) {
+        s5_select_auth(parser, S5_AUTH_PASSWD);
+        conn_write(incoming, "\5\2", 2);  /* Require username password */
+        return s_auth_start;
     }
 
     conn_write(incoming, "\5\377", 2);  /* No acceptable auth. */
     return s_kill;
 }
 
-/* TODO(bnoordhuis) Implement username/password auth. */
+static int do_auth_start(client_ctx *cx) {
+    conn *incoming;
+
+    incoming = &cx->incoming;
+    ASSERT(incoming->rdstate == c_stop);
+    ASSERT(incoming->wrstate == c_done);
+    incoming->wrstate = c_stop;
+
+    if (incoming->result < 0) {
+        pr_err("write error: %s", uv_strerror((int)incoming->result));
+        return do_kill(cx);
+    }
+
+    conn_read(incoming);
+    return s_handshake_auth;
+}
+
 static int do_handshake_auth(client_ctx *cx) {
-    UNREACHABLE();
-    return do_kill(cx);
+    conn *incoming;
+    s5_ctx *parser;
+    uint8_t *data;
+    size_t size;
+    int err;
+
+    parser = &cx->parser;
+    incoming = &cx->incoming;
+    ASSERT(incoming->rdstate == c_done);
+    ASSERT(incoming->wrstate == c_stop);
+    incoming->rdstate = c_stop;
+
+    if (incoming->result < 0) {
+        pr_err("read error: %s", uv_strerror((int)incoming->result));
+        return do_kill(cx);
+    }
+
+    data = (uint8_t *) incoming->t.buf;
+    size = (size_t) incoming->result;
+    err = s5_parse(parser, &data, &size);
+    if (err == s5_ok) {
+        conn_read(incoming);
+        return s_handshake_auth;  /* Need more data. */
+    }
+
+    if (size != 0) {
+
+        pr_err("junk in handshake_auth");
+        return do_kill(cx);
+    }
+
+    if ( err != s5_auth_verify ) {
+        pr_err("handshake_auth error: %s", s5_strerror((s5_err)err));
+        return do_kill(cx);
+    }
+
+    if (
+        strlen((const char*)parser->username) == strlen(cx->sx->username) &&
+        strlen((const char*)parser->password) == strlen(cx->sx->password) &&
+        0 == memcmp((const char*)parser->username, cx->sx->username, strlen(cx->sx->username)) &&
+        0 == memcmp((const char*)parser->password, cx->sx->password, strlen(cx->sx->password))
+        )
+    {
+        conn_write(incoming, "\1\0", 2);
+        return s_req_start;
+    }
+    else
+    {
+        conn_write(incoming, "\1\1", 2);
+        return s_kill;
+    }
 }
 
 static int do_req_start(client_ctx *cx) {
@@ -328,6 +401,7 @@ static int do_req_parse(client_ctx *cx) {
         /* Not supported.  Might be hard to implement because libuv has no
          * functionality for detecting the MTU size which the RFC mandates.
          */
+        // TODO: UDP SUPPORT
         pr_warn("UDP ASSOC requests are not supported.");
         return do_kill(cx);
     }
@@ -341,14 +415,14 @@ static int do_req_parse(client_ctx *cx) {
     if (parser->atyp == s5_atyp_ipv4) {
         memset(&outgoing->t.addr4, 0, sizeof(outgoing->t.addr4));
         outgoing->t.addr4.sin_family = AF_INET;
-        outgoing->t.addr4.sin_port = htons(parser->dport);
+        outgoing->t.addr4.sin_port = htons_u(parser->dport);
         memcpy(&outgoing->t.addr4.sin_addr,
                parser->daddr,
                sizeof(outgoing->t.addr4.sin_addr));
     } else if (parser->atyp == s5_atyp_ipv6) {
         memset(&outgoing->t.addr6, 0, sizeof(outgoing->t.addr6));
         outgoing->t.addr6.sin6_family = AF_INET6;
-        outgoing->t.addr6.sin6_port = htons(parser->dport);
+        outgoing->t.addr6.sin6_port = htons_u(parser->dport);
         memcpy(&outgoing->t.addr6.sin6_addr,
                parser->daddr,
                sizeof(outgoing->t.addr6.sin6_addr));
@@ -385,10 +459,10 @@ static int do_req_lookup(client_ctx *cx) {
     /* Don't make assumptions about the offset of sin_port/sin6_port. */
     switch (outgoing->t.addr.sa_family) {
     case AF_INET:
-        outgoing->t.addr4.sin_port = htons(parser->dport);
+        outgoing->t.addr4.sin_port = htons_u(parser->dport);
         break;
     case AF_INET6:
-        outgoing->t.addr6.sin6_port = htons(parser->dport);
+        outgoing->t.addr6.sin6_port = htons_u(parser->dport);
         break;
     default:
         UNREACHABLE();

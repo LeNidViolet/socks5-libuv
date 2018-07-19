@@ -37,12 +37,20 @@ typedef struct {
     const char *bind_host;
     unsigned short bind_port;
     unsigned int idle_timeout;
+
+    const char *username;
+    const char *password;
+    int auth_none;
 } server_config;
 
 typedef struct {
     unsigned int idle_timeout;  /* Connection idle timeout in ms. */
     uv_tcp_t tcp_handle;
     uv_loop_t *loop;
+
+    const char *username;
+    const char *password;
+    int auth_none;
 } server_ctx;
 
 typedef struct {
@@ -126,6 +134,14 @@ int getopt(int argc, char **argv, const char *options);
 #endif
 
 #define UNREACHABLE() CHECK(!"Unreachable code reached.")
+
+#define htons_u(x)          (unsigned short)( (((x) & 0xffu) << 8u) | (((x) & 0xff00u) >> 8u) )
+
+#define ntohl_u(x)        ( (((x) & 0xffu) << 24u) | \
+                            (((x) & 0xff00u) << 8u) | \
+                            (((x) & 0xff0000u) >> 8u) | \
+                            (((x) & 0xff000000) >> 24u) )
+
 
 /* This macro looks complicated but it's not: it calculates the address
  * of the embedding struct through the address of the embedded struct.
