@@ -21,5 +21,5 @@ FILE(GLOB SOCKS5LIBUV_SRCS ./src/*.c)
 ADD_LIBRARY(uvsocks5 STATIC ${SOCKS5LIBUV_SRCS})
 TARGET_LINK_LIBRARIES(uvsocks5 uv_a)
 
-ADD_EXECUTABLE(uvsocks5-loader main.c)
+ADD_EXECUTABLE(uvsocks5-loader main.c getopt.c)
 TARGET_LINK_LIBRARIES(uvsocks5-loader uvsocks5)
