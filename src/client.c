@@ -744,11 +744,11 @@ static int do_udp_proxy_stop(client_ctx *cx) {
     conn *incoming;
 
     incoming = &cx->incoming;
-    ASSERT(incoming->rdstate == c_done);
+
     ASSERT(incoming->wrstate == c_stop);
     incoming->rdstate = c_stop;
 
-    /* It should be EOF or an ERROR */
+    /* It should be EOF or a read error or timer expire */
     ASSERT(incoming->result < 0);
 
     return do_kill(cx);

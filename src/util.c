@@ -170,11 +170,11 @@ int str_tcp_endpoint(const uv_tcp_t *tcp_handle, endpoint ep, char *buf, int buf
     int addr_len = sizeof(s);
 
     if ( ep == peer ) {
-        ASSERT(0 == uv_tcp_getpeername(tcp_handle,
+        CHECK(0 == uv_tcp_getpeername(tcp_handle,
                                        &s.addr,
                                        &addr_len));
     } else if ( ep == sock ) {
-        ASSERT(0 == uv_tcp_getsockname(tcp_handle,
+        CHECK(0 == uv_tcp_getsockname(tcp_handle,
                                        &s.addr,
                                        &addr_len));
     } else {
@@ -193,7 +193,7 @@ int str_udp_endpoint(const uv_udp_t *udp_handle, char *buf, int buf_len) {
     } s;
     int addr_len = sizeof(s);
 
-    ASSERT(0 == uv_udp_getsockname(udp_handle,
+    CHECK(0 == uv_udp_getsockname(udp_handle,
                                    &s.addr,
                                    &addr_len));
 
