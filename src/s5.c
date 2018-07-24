@@ -49,6 +49,29 @@ void s5_init(s5_ctx *cx) {
     cx->state = s5_version;
 }
 
+s5_err s5_parse_udp(s5_ctx *cx, uint8_t **data, size_t *size) {
+    uint8_t *p = *data;
+
+    /* reserved:2 frag:1 atyp:1 daddr:4(ipv4) dport:2*/
+    if ( *size < 10 )
+        return s5_bad_prot;
+
+    /* skip reserved, 2 bytes */
+    p += 2;
+
+    /* does not support frame frag */
+    if ( *p != 0 )
+        return s5_bad_prot;
+
+    memset(cx, 0, sizeof(*cx));
+    cx->state = s5_req_atyp;
+
+    *data += 3;
+    *size -= 3;
+
+    return s5_parse(cx, data, size);
+}
+
 s5_err s5_parse(s5_ctx *cx, uint8_t **data, size_t *size) {
     s5_err err;
     uint8_t *p;

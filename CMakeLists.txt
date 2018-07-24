@@ -1,4 +1,4 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.10)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.6)
 PROJECT(uvsocks5 C)
 
 SET(CMAKE_C_STANDARD 99)
@@ -21,5 +21,5 @@ FILE(GLOB SOCKS5LIBUV_SRCS ./src/*.c)
 ADD_LIBRARY(uvsocks5 STATIC ${SOCKS5LIBUV_SRCS})
 TARGET_LINK_LIBRARIES(uvsocks5 uv_a)
 
-ADD_EXECUTABLE(uvsocks5-loader main.c getopt.c)
+ADD_EXECUTABLE(uvsocks5-loader program/main.c program/getopt.c)
 TARGET_LINK_LIBRARIES(uvsocks5-loader uvsocks5)

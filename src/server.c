@@ -149,17 +149,32 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
 
         sx = state->servers + n;
         sx->loop = loop;
-        sx->idle_timeout = state->config.idle_timeout;
+        sx->idle_timeout = cf->idle_timeout;
+        sx->bind_port = cf->bind_port;
         sx->username = cf->username ? cf->username : NULL;
         sx->password = cf->password ? cf->password : NULL;
         sx->auth_none = cf->auth_none;
+        sx->cp_link = NULL;
         CHECK(0 == uv_tcp_init(loop, &sx->tcp_handle));
+        CHECK(0 == uv_udp_init(loop, &sx->udp_handle));
 
         what = "uv_tcp_bind";
         err = uv_tcp_bind(&sx->tcp_handle, &s.addr, 0);
         if (err == 0) {
             what = "uv_listen";
-            err = uv_listen((uv_stream_t *) &sx->tcp_handle, 128, on_connection);
+            err = uv_listen((uv_stream_t *) &sx->tcp_handle, SOMAXCONN, on_connection);
+            if ( err == 0 ) {
+
+                what = "uv_udp_bind";
+                err = uv_udp_bind(&sx->udp_handle, &s.addr, 0);
+                if ( err == 0 ) {
+                    what = "uv_udp_read";
+                    err = uv_udp_recv_start(
+                        &sx->udp_handle,
+                        client_endpoint_alloc_cb,
+                        client_endpoint_read_done);
+                }
+            }
         }
 
         if (err != 0) {
@@ -168,10 +183,10 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
                    addrbuf,
                    cf->bind_port,
                    uv_strerror(err));
-            while (n > 0) {
-                n -= 1;
-                uv_close((uv_handle_t *) (state->servers + n), NULL);
-            }
+            do {
+                uv_close((uv_handle_t *)&(state->servers + n)->tcp_handle, NULL);
+                uv_close((uv_handle_t *)&(state->servers + n)->udp_handle, NULL);
+            } while (n-- > 0);
             break;
         }
 

@@ -19,7 +19,7 @@
  * IN THE SOFTWARE.
  */
 
-#include "src/defs.h"
+#include "../src/defs.h"
 #include <stdlib.h>
 
 #if HAVE_UNISTD_H
@@ -128,7 +128,7 @@ static void usage(void) {
            "  -u <username>          User name to connect to this proxy.\n"
            "  -w <password>          Password to connect to this proxy.\n"
            "\n"
-           "  If neither username nor password is provided, proxy do not need authenticate."
+           "  If neither a username nor a password is provided, the proxy does not need to be authenticated."
            "",
            progname);
     exit(1);

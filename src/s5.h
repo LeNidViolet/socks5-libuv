@@ -29,6 +29,7 @@
   V(-1, bad_version, "Bad protocol version.")                                 \
   V(-2, bad_cmd, "Bad protocol command.")                                     \
   V(-3, bad_atyp, "Bad address type.")                                        \
+  V(-4, bad_prot, "Bad protocol.")                                            \
   V(0, ok, "No error.")                                                       \
   V(1, auth_select, "Select authentication method.")                          \
   V(2, auth_verify, "Verify authentication.")                                 \
@@ -38,7 +39,7 @@ typedef enum {
 #define S5_ERR_GEN(code, name, _) s5_ ## name = (code),
     S5_ERR_MAP(S5_ERR_GEN)
 #undef S5_ERR_GEN
-//    s5_max_errors
+    s5_max_errors
 } s5_err;
 
 typedef enum {
@@ -80,7 +81,7 @@ typedef struct {
 } s5_ctx;
 
 void s5_init(s5_ctx *ctx);
-
+s5_err s5_parse_udp(s5_ctx *cx, uint8_t **data, size_t *size);
 s5_err s5_parse(s5_ctx *cx, uint8_t **data, size_t *size);
 
 /* Only call after s5_parse() has returned s5_want_auth_method. */

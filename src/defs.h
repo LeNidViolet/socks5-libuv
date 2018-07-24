@@ -45,12 +45,16 @@ typedef struct {
 
 typedef struct {
     unsigned int idle_timeout;  /* Connection idle timeout in ms. */
+    unsigned short bind_port;
     uv_tcp_t tcp_handle;
+    uv_udp_t udp_handle;
     uv_loop_t *loop;
 
     const char *username;
     const char *password;
     int auth_none;
+
+    struct client_endpoint *cp_link;    /* Link head */
 } server_ctx;
 
 typedef struct {
@@ -79,12 +83,82 @@ typedef struct {
     } t;
 } conn;
 
+/* Maximum Payload length *in general* */
+#define MAX_UDP_PAYLOAD_LEN             512
+#define S5_IPV4_UDP_SEND_HDR_LEN        10
+#define S5_IPV6_UDP_SEND_HDR_LEN        22
+
+/* Just in ip fmt */
+#define MAX_S5_UDP_SEND_HDR_LEN         S5_IPV6_UDP_SEND_HDR_LEN
+
+/* server link (udp client can send data to multiple different addresses) */
+typedef struct server_endpoint {
+    struct server_endpoint *next;
+
+    /* destination address */
+    union {
+        struct sockaddr_in6 addr6;
+        struct sockaddr_in addr4;
+        struct sockaddr addr;
+    } server;
+
+    char buf[MAX_UDP_PAYLOAD_LEN + MAX_S5_UDP_SEND_HDR_LEN];  /* max udp packet len + max s5 hdr len */
+
+    uv_udp_send_t send_req;
+    uv_udp_t handle;
+
+    char link_info[128];
+
+    struct client_endpoint *cp;  /* Backlink */
+} server_endpoint;
+
+/* for each incoming proxy request, indicate by ip:port */
+typedef struct client_endpoint {
+    struct client_endpoint *next;
+
+    /* udp client address */
+    union {
+        struct sockaddr_in6 addr6;
+        struct sockaddr_in addr4;
+        struct sockaddr addr;
+    } client;
+
+    struct server_endpoint *sp; /* server endpoint list head */
+
+    struct client_ctx *cx;  /* Backlink */
+} client_endpoint;
+
+
+typedef struct server_endpoint_param {
+    client_endpoint *cp;
+
+    const char *data;
+    size_t data_len;
+
+    union {
+        struct sockaddr_in6 addr6;
+        struct sockaddr_in addr4;
+        struct sockaddr addr;
+    } s;
+
+    union {
+        uv_udp_send_t send_req;
+        uv_getaddrinfo_t getaddr_req;
+    } r;
+} server_endpoint_param;
+
+
 typedef struct client_ctx {
     int state;
+    int index;
     server_ctx *sx;  /* Backlink to owning server context. */
     s5_ctx parser;  /* The SOCKS protocol parser. */
     conn incoming;  /* Connection with the SOCKS client. */
     conn outgoing;  /* Connection with upstream. */
+    client_endpoint *cp;
+    int outstanding;
+
+    char link_info[128];
 } client_ctx;
 
 /* server.c */
@@ -97,6 +171,14 @@ int can_access(const server_ctx *sx,
 
 /* client.c */
 void client_finish_init(server_ctx *sx, client_ctx *cx);
+void client_endpoint_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf);
+void client_endpoint_read_done(
+    uv_udp_t *handle, ssize_t nread,
+    const uv_buf_t *buf,
+    const struct sockaddr *addr,
+    unsigned flags
+);
+
 
 /* util.c */
 #if defined(__GNUC__)
@@ -108,6 +190,17 @@ void pr_info(const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(1, 2);
 void pr_warn(const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(1, 2);
 void pr_err(const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(1, 2);
 void *xmalloc(size_t size);
+
+typedef enum {
+    peer,
+    sock
+}endpoint;
+int str_sockaddr(const struct sockaddr *addr, char *buf, int buf_len);
+int str_tcp_endpoint(const uv_tcp_t *tcp_handle, endpoint ep, char *buf, int buf_len);
+int str_udp_endpoint(const uv_udp_t *udp_handle, char *buf, int buf_len);
+void desc_tcp_proxy_link(client_ctx *cx);
+void desc_udp_endpoint_link(client_ctx *cx, server_endpoint *sp);
+void desc_upd_proxy_link(client_ctx *cx);
 
 /* main.c */
 const char *_getprogname(void);
@@ -133,15 +226,18 @@ int getopt(int argc, char **argv, const char *options);
 # define DEBUG_CHECKS (1)
 #endif
 
+#define ENSURE(exp)      do { if (!(exp)) abort(); } while (0)
+
 #define UNREACHABLE() CHECK(!"Unreachable code reached.")
 
 #define htons_u(x)          (unsigned short)( (((x) & 0xffu) << 8u) | (((x) & 0xff00u) >> 8u) )
+#define ntohs_u(x)          htons_u(x)
 
 #define ntohl_u(x)        ( (((x) & 0xffu) << 24u) | \
                             (((x) & 0xff00u) << 8u) | \
                             (((x) & 0xff0000u) >> 8u) | \
                             (((x) & 0xff000000) >> 24u) )
-
+#define htonl_u(x)          ntohl_u(x)
 
 /* This macro looks complicated but it's not: it calculates the address
  * of the embedding struct through the address of the embedded struct.
