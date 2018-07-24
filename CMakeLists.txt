@@ -16,7 +16,12 @@ INCLUDE_DIRECTORIES(${SOCKS5LIBUV_ADDTION_HDR})
 ADD_SUBDIRECTORY(${LIBUV_DIR} ./libuv)
 
 
-FILE(GLOB SOCKS5LIBUV_SRCS ./src/*.c)
+SET(SOCKS5LIBUV_SRCS
+        src/client.c
+        src/s5.c
+        src/server.c
+        src/util.c
+)
 
 ADD_LIBRARY(uvsocks5 STATIC ${SOCKS5LIBUV_SRCS})
 TARGET_LINK_LIBRARIES(uvsocks5 uv_a)
