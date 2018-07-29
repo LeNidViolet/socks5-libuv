@@ -276,14 +276,15 @@ static int do_handshake(client_ctx *cx) {
 
     parser = &cx->parser;
     incoming = &cx->incoming;
-    ASSERT(incoming->rdstate == c_done);
-    ASSERT(incoming->wrstate == c_stop);
-    incoming->rdstate = c_stop;
 
     if (incoming->result < 0) {
         pr_err("[%d] Handshake Read Error: %s", cx->index, uv_strerror((int)incoming->result));
         return do_kill(cx);
     }
+
+    ASSERT(incoming->rdstate == c_done);
+    ASSERT(incoming->wrstate == c_stop);
+    incoming->rdstate = c_stop;
 
     data = (uint8_t *) incoming->t.buf;
     size = (size_t) incoming->result;
@@ -329,14 +330,15 @@ static int do_auth_start(client_ctx *cx) {
     conn *incoming;
 
     incoming = &cx->incoming;
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_done);
-    incoming->wrstate = c_stop;
 
     if (incoming->result < 0) {
         pr_err("[%d] Auth Write Error: %s", cx->index, uv_strerror((int)incoming->result));
         return do_kill(cx);
     }
+
+    ASSERT(incoming->rdstate == c_stop);
+    ASSERT(incoming->wrstate == c_done);
+    incoming->wrstate = c_stop;
 
     conn_read(incoming);
     return s_handshake_auth;
@@ -351,14 +353,15 @@ static int do_handshake_auth(client_ctx *cx) {
 
     parser = &cx->parser;
     incoming = &cx->incoming;
-    ASSERT(incoming->rdstate == c_done);
-    ASSERT(incoming->wrstate == c_stop);
-    incoming->rdstate = c_stop;
 
     if (incoming->result < 0) {
         pr_err("[%d] Handshake Auth Read Error: %s", cx->index, uv_strerror((int)incoming->result));
         return do_kill(cx);
     }
+
+    ASSERT(incoming->rdstate == c_done);
+    ASSERT(incoming->wrstate == c_stop);
+    incoming->rdstate = c_stop;
 
     data = (uint8_t *) incoming->t.buf;
     size = (size_t) incoming->result;
@@ -400,14 +403,15 @@ static int do_req_start(client_ctx *cx) {
     conn *incoming;
 
     incoming = &cx->incoming;
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_done);
-    incoming->wrstate = c_stop;
 
     if (incoming->result < 0) {
         pr_err("[%d] Auth Reply Write Error: %s", cx->index, uv_strerror((int)incoming->result));
         return do_kill(cx);
     }
+
+    ASSERT(incoming->rdstate == c_stop);
+    ASSERT(incoming->wrstate == c_done);
+    incoming->wrstate = c_stop;
 
     conn_read(incoming);
     return s_req_parse;
@@ -424,16 +428,17 @@ static int do_req_parse(client_ctx *cx) {
     parser = &cx->parser;
     incoming = &cx->incoming;
     outgoing = &cx->outgoing;
-    ASSERT(incoming->rdstate == c_done);
-    ASSERT(incoming->wrstate == c_stop);
-    ASSERT(outgoing->rdstate == c_stop);
-    ASSERT(outgoing->wrstate == c_stop);
-    incoming->rdstate = c_stop;
 
     if (incoming->result < 0) {
         pr_err("[%d] S5 Request Read Error: %s", cx->index, uv_strerror((int)incoming->result));
         return do_kill(cx);
     }
+
+    ASSERT(incoming->rdstate == c_done);
+    ASSERT(incoming->wrstate == c_stop);
+    ASSERT(outgoing->rdstate == c_stop);
+    ASSERT(outgoing->wrstate == c_stop);
+    incoming->rdstate = c_stop;
 
     data = (uint8_t *) incoming->t.buf;
     size = (size_t) incoming->result;
@@ -498,10 +503,6 @@ static int do_req_lookup(client_ctx *cx) {
     parser = &cx->parser;
     incoming = &cx->incoming;
     outgoing = &cx->outgoing;
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_stop);
-    ASSERT(outgoing->rdstate == c_stop);
-    ASSERT(outgoing->wrstate == c_stop);
 
     if (outgoing->result < 0) {
         /* TODO(bnoordhuis) Escape control characters in parser->daddr. */
@@ -513,6 +514,11 @@ static int do_req_lookup(client_ctx *cx) {
         conn_write(incoming, "\5\4\0\1\0\0\0\0\0\0", 10);
         return s_kill;
     }
+
+    ASSERT(incoming->rdstate == c_stop);
+    ASSERT(incoming->wrstate == c_stop);
+    ASSERT(outgoing->rdstate == c_stop);
+    ASSERT(outgoing->wrstate == c_stop);
 
     /* Don't make assumptions about the offset of sin_port/sin6_port. */
     switch (outgoing->t.addr.sa_family) {
@@ -542,13 +548,6 @@ static int do_req_connect_start(client_ctx *cx) {
     ASSERT(outgoing->rdstate == c_stop);
     ASSERT(outgoing->wrstate == c_stop);
 
-//    if (!can_access(cx->sx, cx, &outgoing->t.addr)) {
-//        pr_warn("connection not allowed by ruleset");
-//        /* Send a 'Connection not allowed by ruleset' reply. */
-//        conn_write(incoming, "\5\2\0\1\0\0\0\0\0\0", 10);
-//        return s_kill;
-//    }
-
     err = conn_connect(outgoing);
     if (err != 0) {
         pr_err("[%d] Connect Error: %s", cx->index, uv_strerror(err));
@@ -569,6 +568,15 @@ static int do_req_connect(client_ctx *cx) {
 
     incoming = &cx->incoming;
     outgoing = &cx->outgoing;
+
+    if ( outgoing->result != 0 ) {
+        pr_err("[%d] Upstream Connection Error: %s",
+               cx->index, uv_strerror((int)outgoing->result));
+        /* Send a 'Connection refused' reply. */
+        conn_write(incoming, "\5\5\0\1\0\0\0\0\0\0", 10);
+        return s_kill;
+    }
+
     ASSERT(incoming->rdstate == c_stop);
     ASSERT(incoming->wrstate == c_stop);
     ASSERT(outgoing->rdstate == c_stop);
@@ -576,44 +584,36 @@ static int do_req_connect(client_ctx *cx) {
 
     /* Build and send the reply.  Not very pretty but gets the job done. */
     buf = (uint8_t *) incoming->t.buf;
-    if (outgoing->result == 0) {
-        /* The RFC mandates that the SOCKS server must include the local port
-         * and address in the reply.  So that's what we do.
-         */
-        addrlen = sizeof(addr_storage);
-        CHECK(0 == uv_tcp_getsockname(&outgoing->handle.tcp,
-                                      (struct sockaddr *) addr_storage,
-                                      &addrlen));
-        buf[0] = 5;  /* Version. */
-        buf[1] = 0;  /* Success. */
-        buf[2] = 0;  /* Reserved. */
-        if (addrlen == sizeof(*in)) {
-            buf[3] = 1;  /* IPv4. */
-            in = (const struct sockaddr_in *) &addr_storage;
-            memcpy(buf + 4, &in->sin_addr, 4);
-            memcpy(buf + 8, &in->sin_port, 2);
-            conn_write(incoming, buf, 10);
-        } else if (addrlen == sizeof(*in6)) {
-            buf[3] = 4;  /* IPv6. */
-            in6 = (const struct sockaddr_in6 *) &addr_storage;
-            memcpy(buf + 4, &in6->sin6_addr, 16);
-            memcpy(buf + 20, &in6->sin6_port, 2);
-            conn_write(incoming, buf, 22);
-        } else {
-            UNREACHABLE();
-        }
-
-        desc_tcp_proxy_link(cx);
-        pr_info("[%d] Connected [%s]", cx->index, cx->link_info);
-
-        return s_proxy_start;
+    /* The RFC mandates that the SOCKS server must include the local port
+     * and address in the reply.  So that's what we do.
+     */
+    addrlen = sizeof(addr_storage);
+    CHECK(0 == uv_tcp_getsockname(&outgoing->handle.tcp,
+                                  (struct sockaddr *) addr_storage,
+                                  &addrlen));
+    buf[0] = 5;  /* Version. */
+    buf[1] = 0;  /* Success. */
+    buf[2] = 0;  /* Reserved. */
+    if (addrlen == sizeof(*in)) {
+        buf[3] = 1;  /* IPv4. */
+        in = (const struct sockaddr_in *) &addr_storage;
+        memcpy(buf + 4, &in->sin_addr, 4);
+        memcpy(buf + 8, &in->sin_port, 2);
+        conn_write(incoming, buf, 10);
+    } else if (addrlen == sizeof(*in6)) {
+        buf[3] = 4;  /* IPv6. */
+        in6 = (const struct sockaddr_in6 *) &addr_storage;
+        memcpy(buf + 4, &in6->sin6_addr, 16);
+        memcpy(buf + 20, &in6->sin6_port, 2);
+        conn_write(incoming, buf, 22);
     } else {
-        pr_err("[%d] Upstream Connection Error: %s",
-               cx->index, uv_strerror((int)outgoing->result));
-        /* Send a 'Connection refused' reply. */
-        conn_write(incoming, "\5\5\0\1\0\0\0\0\0\0", 10);
-        return s_kill;
+        UNREACHABLE();
     }
+
+    desc_tcp_proxy_link(cx);
+    pr_info("[%d] Connected [%s]", cx->index, cx->link_info);
+
+    return s_proxy_start;
 }
 
 static int do_proxy_start(client_ctx *cx) {
@@ -723,16 +723,16 @@ static int do_udp_proxy_start(client_ctx *cx) {
 
     incoming = &cx->incoming;
 
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_done);
-    incoming->wrstate = c_stop;
-
     if ( incoming->result < 0 )
     {
         pr_err("[%d] Client Endpoint Write Error: %s [%s]",
                cx->index, uv_strerror((int)incoming->result), cx->link_info);
         return do_kill(cx);
     }
+
+    ASSERT(incoming->rdstate == c_stop);
+    ASSERT(incoming->wrstate == c_done);
+    incoming->wrstate = c_stop;
 
     /* Wait EOF */
     conn_read(incoming);
@@ -755,7 +755,7 @@ static int do_udp_proxy_stop(client_ctx *cx) {
 }
 
 static int do_kill(client_ctx *cx) {
-    int new_state;
+    int new_state = s_almost_dead_1;
 
     if ( cx->outstanding != 0 ) {
         /* Wait for uncomplete write operation */
@@ -767,15 +767,6 @@ static int do_kill(client_ctx *cx) {
 
     if (cx->state >= s_almost_dead_0) {
         return cx->state;
-    }
-
-    /* Try to cancel the request. The callback still runs but if the
-     * cancellation succeeded, it gets called with status=UV_ECANCELED.
-     */
-    new_state = s_almost_dead_1;
-    if (cx->state == s_req_lookup) {
-        new_state = s_almost_dead_0;
-        uv_cancel(&cx->outgoing.t.req);
     }
 
     conn_close(&cx->incoming);
@@ -830,9 +821,39 @@ static void conn_timer_reset(conn *c) {
 
 static void conn_timer_expire(uv_timer_t *handle) {
     conn *c;
+    conn *incoming;
+    conn *outgoing;
 
     c = CONTAINER_OF(handle, conn, timer_handle);
-    c->result = UV_ETIMEDOUT;
+    incoming = &c->client->incoming;
+    outgoing = &c->client->outgoing;
+
+    switch ( c->client->state ) {
+    case s_handshake:
+    case s_auth_start:
+    case s_handshake_auth:
+    case s_req_start:
+    case s_req_parse:
+
+    case s_udp_proxy_start:
+    case s_udp_proxy_until:
+        ASSERT(c == incoming);
+        incoming->result = UV_ETIMEDOUT;
+        break;
+
+    case s_req_lookup:
+    case s_req_connect:
+        outgoing->result = UV_ETIMEDOUT;
+
+    case s_proxy_start:
+        incoming->result = UV_ETIMEDOUT;
+        break;
+
+    default:
+        c->result = UV_ETIMEDOUT;
+        break;
+    }
+
     do_next(c->client);
 }
 
@@ -849,6 +870,7 @@ static void conn_getaddrinfo(conn *c, const char *hostname) {
                               hostname,
                               NULL,
                               &hints));
+    c->client->outstanding++;
     conn_timer_reset(c);
 }
 
@@ -872,6 +894,8 @@ static void conn_getaddrinfo_done(uv_getaddrinfo_t *req,
     }
 
     uv_freeaddrinfo(ai);
+
+    c->client->outstanding--;
     do_next(c->client);
 }
 
@@ -880,21 +904,21 @@ static int conn_connect(conn *c) {
     ASSERT(c->t.addr.sa_family == AF_INET ||
            c->t.addr.sa_family == AF_INET6);
     conn_timer_reset(c);
-    return uv_tcp_connect(&c->t.connect_req,
-                          &c->handle.tcp,
-                          &c->t.addr,
-                          conn_connect_done);
+    CHECK(0 == uv_tcp_connect(&c->t.connect_req,
+                              &c->handle.tcp,
+                              &c->t.addr,
+                              conn_connect_done));
+    c->client->outstanding++;
+    return 0;
 }
 
 static void conn_connect_done(uv_connect_t *req, int status) {
     conn *c;
 
-    if (status == UV_ECANCELED) {
-        return;  /* Handle has been closed. */
-    }
-
     c = CONTAINER_OF(req, conn, t.connect_req);
     c->result = status;
+
+    c->client->outstanding--;
     do_next(c->client);
 }
 
@@ -954,11 +978,6 @@ static void conn_write(conn *c, const void *data, unsigned int len) {
 
 static void conn_write_done(uv_write_t *req, int status) {
     conn *c;
-
-    /* Mabye it's the last step to clear */
-//    if (status == UV_ECANCELED) {
-//        return;  /* Handle has been closed. */
-//    }
 
     c = CONTAINER_OF(req, conn, write_req);
     c->client->outstanding--;
