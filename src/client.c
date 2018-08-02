@@ -322,7 +322,7 @@ static int do_handshake(client_ctx *cx) {
         return s_auth_start;
     }
 
-    conn_write(incoming, "\5\377", 2);  /* No acceptable auth. */
+    conn_write(incoming, "\5\255", 2);  /* No acceptable auth. */
     return s_kill;
 }
 
