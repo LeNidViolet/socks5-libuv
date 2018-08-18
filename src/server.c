@@ -19,244 +19,575 @@
  * IN THE SOFTWARE.
  */
 
-#include "defs.h"
 #include <stdlib.h>
+#include "uvsocks5/uvsocks5.h"
+#include "internal.h"
+#include "dnsc.h"
 
-#ifndef INET6_ADDRSTRLEN
-# define INET6_ADDRSTRLEN 63
-#endif
+UVSOCKS5_CTX uvsocks5_ctx;
 
-typedef struct {
-    uv_getaddrinfo_t getaddrinfo_req;
-    server_config config;
-    server_ctx *servers;
-    uv_loop_t *loop;
-} server_state;
-
+static int server_run(UVSOCKS5_CTX *ctx);
 static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs);
 static void on_connection(uv_stream_t *server, int status);
+static void conn_alloc(uv_handle_t *handle, size_t size, uv_buf_t *buf);
+static void conn_read_done(uv_stream_t *handle, ssize_t nread, const uv_buf_t *buf);
+static void conn_write_done(uv_write_t *req, int status);
+static void conn_close(CONN *conn);
+static void conn_close_done(uv_handle_t *handle);
+static void conn_timer_expire(uv_timer_t *handle);
 
-int server_run(const server_config *cf, uv_loop_t *loop) {
+static int do_almost_dead(PROXY_NODE *pn);
+static int do_clear(PROXY_NODE *pn);
+
+
+static void loop_walk_clear(uv_loop_t *loop);
+static void loop_walk_cb(uv_handle_t* handle, void* arg);
+static void loop_walk_close_done(uv_handle_t* handle);
+
+int ssnetio_server_launch(UVSOCKS5_CTX *ctx) {
+    int ret = -1;
+
+    BREAK_ON_NULL(ctx);
+
+    dnsc_init();
+
+    memcpy(&uvsocks5_ctx, ctx, sizeof(uvsocks5_ctx));
+    if ( !uvsocks5_ctx.config.bind_host )
+        uvsocks5_ctx.config.bind_host = DEFAULT_BIND_HOST;
+    if ( !uvsocks5_ctx.config.bind_port )
+        uvsocks5_ctx.config.bind_port = DEFAULT_BIND_PORT;
+    if ( !uvsocks5_ctx.config.idel_timeout )
+        uvsocks5_ctx.config.idel_timeout = DEFAULT_IDEL_TIMEOUT;
+
+    ret = server_run(&uvsocks5_ctx);
+
+    dnsc_clear();
+
+BREAK_LABEL:
+
+    return ret;
+}
+
+static int server_run(UVSOCKS5_CTX *ctx) {
     struct addrinfo hints;
-    server_state state;
-    int err;
+    uv_loop_t *loop;
+    int ret;
+    uv_getaddrinfo_t req;
 
-    memset(&state, 0, sizeof(state));
-    state.servers = NULL;
-    state.config = *cf;
-    state.loop = loop;
+    loop = uv_default_loop();
 
-    /* Resolve the address of the interface that we should bind to.
-     * The getaddrinfo callback starts the server and everything else.
-     */
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    err = uv_getaddrinfo(loop,
-                         &state.getaddrinfo_req,
+    uv_req_set_data((uv_req_t *)&req, loop);
+    ret = uv_getaddrinfo(loop,
+                         &req,
                          do_bind,
-                         cf->bind_host,
+                         ctx->config.bind_host,
                          NULL,
                          &hints);
-    if (err != 0) {
-        pr_err("getaddrinfo: %s", uv_strerror(err));
-        return err;
+    if ( 0 != ret ) {
+        notify_msg_out(1, "uv_getaddrinfo failed: %s", uv_strerror(ret));
+        BREAK_NOW;
     }
 
     /* Start the event loop.  Control continues in do_bind(). */
-    if (uv_run(loop, UV_RUN_DEFAULT)) {
-        abort();
-    }
+    ret = uv_run(loop, UV_RUN_DEFAULT);
 
-    /* Please Valgrind. */
-    uv_loop_delete(loop);
-    free(state.servers);
-    return 0;
+    uv_loop_close(loop);
+
+BREAK_LABEL:
+
+    return ret;
 }
 
-/* Bind a server to each address that getaddrinfo() reported. */
+
 static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
     char addrbuf[INET6_ADDRSTRLEN + 1];
-    unsigned int ipv4_naddrs;
-    unsigned int ipv6_naddrs;
-    server_state *state;
-    server_config *cf;
+    unsigned int naddrs;
+    unsigned short port;
     struct addrinfo *ai;
     const void *addrv = NULL;
-    const char *what;
     uv_loop_t *loop;
-    server_ctx *sx;
-    unsigned int n;
-    int err;
+    int ret = -1;
     union {
         struct sockaddr addr;
         struct sockaddr_in addr4;
         struct sockaddr_in6 addr6;
     } s;
+    uv_tcp_t *tcp_handle;
 
-    state = CONTAINER_OF(req, server_state, getaddrinfo_req);
-    loop = state->loop;
-    cf = &state->config;
+    loop = uv_req_get_data((uv_req_t *)req);
 
-    if (status < 0) {
-        pr_err("getaddrinfo(\"%s\"): %s", cf->bind_host, uv_strerror(status));
-        uv_freeaddrinfo(addrs);
-        return;
+    if ( status < 0 ) {
+        notify_msg_out(1, "uv_getaddrinfo failed: %s", uv_strerror(status));
+        BREAK_NOW;
     }
 
-    ipv4_naddrs = 0;
-    ipv6_naddrs = 0;
-    for (ai = addrs; ai != NULL; ai = ai->ai_next) {
-        if (ai->ai_family == AF_INET) {
-            ipv4_naddrs += 1;
-        } else if (ai->ai_family == AF_INET6) {
-            ipv6_naddrs += 1;
+    naddrs = 0;
+    for ( ai = addrs; ai != NULL; ai = ai->ai_next ) {
+        if ( ai->ai_family == AF_INET || ai->ai_family == AF_INET6 ) {
+            naddrs++;
         }
     }
 
-    if (ipv4_naddrs == 0 && ipv6_naddrs == 0) {
-        pr_err("%s has no IPv4/6 addresses", cf->bind_host);
-        uv_freeaddrinfo(addrs);
-        return;
-    }
+    BREAK_ON_NULL(naddrs);
 
-    state->servers =
-        xmalloc((ipv4_naddrs + ipv6_naddrs) * sizeof(state->servers[0]));
-
-    n = 0;
-    for (ai = addrs; ai != NULL; ai = ai->ai_next) {
-        if (ai->ai_family != AF_INET && ai->ai_family != AF_INET6) {
+    port = uvsocks5_ctx.config.bind_port;
+    for ( ai = addrs; ai != NULL; ai = ai->ai_next ) {
+        if ( ai->ai_family != AF_INET && ai->ai_family != AF_INET6 ) {
             continue;
         }
 
-        if (ai->ai_family == AF_INET) {
-            s.addr4 = *(const struct sockaddr_in *) ai->ai_addr;
-            s.addr4.sin_port = htons_u(cf->bind_port);
+        if ( ai->ai_family == AF_INET ) {
+            s.addr4 = *(const struct sockaddr_in *)ai->ai_addr;
+            s.addr4.sin_port = htons_u(port);
             addrv = &s.addr4.sin_addr;
-        } else if (ai->ai_family == AF_INET6) {
-            s.addr6 = *(const struct sockaddr_in6 *) ai->ai_addr;
-            s.addr6.sin6_port = htons_u(cf->bind_port);
+        }
+        else if ( ai->ai_family == AF_INET6 ) {
+            s.addr6 = *(const struct sockaddr_in6 *)ai->ai_addr;
+            s.addr6.sin6_port = htons_u(port);
             addrv = &s.addr6.sin6_addr;
-        } else {
+        }
+        else {
             UNREACHABLE();
         }
 
-        if (uv_inet_ntop(s.addr.sa_family, addrv, addrbuf, sizeof(addrbuf))) {
-            UNREACHABLE();
+        CHECK(0 == uv_inet_ntop(
+            s.addr.sa_family,
+            addrv,
+            addrbuf,
+            sizeof(addrbuf)));
+
+        /* tcp bind */
+        ENSURE((tcp_handle = malloc(sizeof(*tcp_handle))) != NULL);
+        CHECK(0 == uv_tcp_init(loop, tcp_handle));
+
+        ret = uv_tcp_bind(tcp_handle, &s.addr, 0);
+        if ( 0 != ret ) {
+            notify_msg_out(
+                1,
+                "Tcp bind to %s:%d failed: %s",
+                addrbuf,
+                port,
+                uv_strerror(ret));
+            BREAK_NOW;
         }
 
-        sx = state->servers + n;
-        sx->loop = loop;
-        sx->idle_timeout = cf->idle_timeout;
-        sx->bind_port = cf->bind_port;
-        sx->username = cf->username ? cf->username : NULL;
-        sx->password = cf->password ? cf->password : NULL;
-        sx->auth_none = cf->auth_none;
-        sx->cp_link = NULL;
-        CHECK(0 == uv_tcp_init(loop, &sx->tcp_handle));
-        CHECK(0 == uv_udp_init(loop, &sx->udp_handle));
-
-        what = "uv_tcp_bind";
-        err = uv_tcp_bind(&sx->tcp_handle, &s.addr, 0);
-        if (err == 0) {
-            what = "uv_listen";
-            err = uv_listen((uv_stream_t *) &sx->tcp_handle, SOMAXCONN, on_connection);
-            if ( err == 0 ) {
-
-                what = "uv_udp_bind";
-                err = uv_udp_bind(&sx->udp_handle, &s.addr, 0);
-                if ( err == 0 ) {
-                    what = "uv_udp_read";
-                    err = uv_udp_recv_start(
-                        &sx->udp_handle,
-                        client_endpoint_alloc_cb,
-                        client_endpoint_read_done);
-                }
-            }
+        ret = uv_listen((uv_stream_t *)tcp_handle, SOMAXCONN, on_connection);
+        if ( 0 != ret ) {
+            notify_msg_out(
+                1,
+                "Tcp listen to %s:%d failed: %s",
+                addrbuf,
+                port,
+                uv_strerror(ret));
+            BREAK_NOW;
         }
 
-        if (err != 0) {
-            pr_err("%s(\"%s:%hu\"): %s",
-                   what,
-                   addrbuf,
-                   cf->bind_port,
-                   uv_strerror(err));
-            do {
-                uv_close((uv_handle_t *)&(state->servers + n)->tcp_handle, NULL);
-                uv_close((uv_handle_t *)&(state->servers + n)->udp_handle, NULL);
-            } while (n-- > 0);
-            break;
-        }
-
-        pr_info("listening on %s:%hu", addrbuf, cf->bind_port);
-        n += 1;
+        notify_bind(addrbuf, port);
     }
 
-    uv_freeaddrinfo(addrs);
+BREAK_LABEL:
+
+    if ( addrs )
+        uv_freeaddrinfo(addrs);
+
+    if ( 0 != ret )
+        loop_walk_clear(loop);
 }
 
 static void on_connection(uv_stream_t *server, int status) {
-    server_ctx *sx;
-    client_ctx *cx;
+    static unsigned int index = 0;
+    uv_loop_t *loop;
+    PROXY_NODE *pn;
+    CONN *incoming;
+    CONN *outgoing;
 
-    CHECK(status == 0);
-    sx = CONTAINER_OF(server, server_ctx, tcp_handle);
-    cx = xmalloc(sizeof(*cx));
-    CHECK(0 == uv_tcp_init(sx->loop, &cx->incoming.handle.tcp));
-    CHECK(0 == uv_accept(server, &cx->incoming.handle.stream));
-    client_finish_init(sx, cx);
+    BREAK_ON_FALSE(0 == status);
+
+    loop = uv_handle_get_loop((uv_handle_t *)server);
+
+    ENSURE((pn = malloc(sizeof(*pn))) != NULL);
+    memset(pn, 0, sizeof(*pn));
+
+    pn->state = s_handshake;
+    pn->outstanding = 0;
+    pn->index = index++;
+    pn->loop = loop;
+    pn->ctx = NULL;
+
+    incoming = &pn->incoming;
+    outgoing = &pn->outgoing;
+
+    CHECK(0 == uv_tcp_init(loop, &incoming->handle.tcp));
+    CHECK(0 == uv_accept(server, &incoming->handle.stream));
+    uv_handle_set_data((uv_handle_t *)&incoming->handle.tcp, incoming);
+    incoming->pn = pn;
+    incoming->result = 0;
+    incoming->rdstate = c_stop;
+    incoming->wrstate = c_stop;
+    incoming->idle_timeout = uvsocks5_ctx.config.idel_timeout;
+    CHECK(0 == uv_timer_init(loop, &incoming->timer_handle));
+
+    CHECK(0 == uv_tcp_init(loop, &outgoing->handle.tcp));
+    uv_handle_set_data((uv_handle_t *)&outgoing->handle.tcp, outgoing);
+    outgoing->pn = pn;
+    outgoing->result = 0;
+    outgoing->rdstate = c_stop;
+    outgoing->wrstate = c_stop;
+    outgoing->idle_timeout = uvsocks5_ctx.config.idel_timeout;
+    CHECK(0 == uv_timer_init(loop, &outgoing->timer_handle));
+
+    /* Emit a notify */
+    handle_new_stream(incoming);
+    incoming->us_buf.buf_base = incoming->t.raw;
+    incoming->us_buf.buf_len = sizeof(incoming->t.raw);
+    outgoing->us_buf.buf_base = outgoing->t.raw;
+    outgoing->us_buf.buf_len = sizeof(outgoing->t.raw);
+
+    /* Wait for the initial packet. */
+    conn_read(incoming);
+
+BREAK_LABEL:
+
+    return;
 }
 
-int can_auth_none(const server_ctx *sx, const client_ctx *cx) {
-    (void)cx;
-    return sx->auth_none;
+int conn_connect(CONN *conn) {
+    ASSERT(conn->t.addr.sa_family == AF_INET ||
+           conn->t.addr.sa_family == AF_INET6);
+    conn_timer_reset(conn);
+    CHECK(0 == uv_tcp_connect(&conn->t.connect_req,
+                              &conn->handle.tcp,
+                              &conn->t.addr,
+                              conn_connect_done));
+    conn->pn->outstanding++;
+    return 0;
 }
 
-int can_auth_passwd(const server_ctx *sx, const client_ctx *cx) {
-    (void)cx;
-    return (sx->username && sx->password);
+static void conn_alloc(uv_handle_t *handle, size_t size, uv_buf_t *buf) {
+    CONN *conn;
+
+    (void)size;
+
+    conn = uv_handle_get_data(handle);
+
+    buf->base = conn->us_buf.buf_base;
+    buf->len = conn->us_buf.buf_len;
 }
 
-int can_access(const server_ctx *sx,
-    const client_ctx *cx,
-    const struct sockaddr *addr) {
-    const struct sockaddr_in6 *addr6;
-    const struct sockaddr_in *addr4;
-    const uint32_t *p;
-    uint32_t a;
-    uint32_t b;
-    uint32_t c;
-    uint32_t d;
+void conn_read(CONN *conn) {
+    ASSERT(conn->rdstate == c_stop);
 
-    (void)sx;
-    (void)cx;
+    if( 0 != uv_read_start(
+        &conn->handle.stream,
+        conn_alloc,
+        conn_read_done) ) {
 
-    /* TODO(bnoordhuis) Implement proper access checks.  For now, just reject
-     * traffic to localhost.
-     */
-    if (addr->sa_family == AF_INET) {
-        addr4 = (const struct sockaddr_in *) addr;
-        d = ntohl_u(addr4->sin_addr.s_addr);
-        return (d >> 24u) != 0x7F;
+        do_kill(conn->pn);
+        BREAK_NOW;
+    }
+    conn->rdstate = c_busy;
+    conn_timer_reset(conn);
+
+BREAK_LABEL:
+
+    return;
+}
+
+static void conn_read_done(uv_stream_t *handle, ssize_t nread, const uv_buf_t *buf) {
+    CONN *conn;
+
+    conn = uv_handle_get_data((uv_handle_t*)handle);
+    ASSERT(conn->us_buf.buf_base == buf->base);
+    ASSERT(conn->rdstate == c_busy);
+    conn->rdstate = c_done;
+    conn->result = nread;
+
+    uv_read_stop(&conn->handle.stream);
+    do_next(conn);
+}
+
+void conn_write(CONN *conn, const void *data, unsigned int len) {
+    uv_buf_t buf;
+
+    ASSERT(conn->wrstate == c_stop || conn->wrstate == c_done);
+    conn->wrstate = c_busy;
+
+    buf = uv_buf_init((char*)data, len);
+
+    if ( 0 != uv_write(&conn->write_req,
+                       &conn->handle.stream,
+                       &buf,
+                       1,
+                       conn_write_done) ) {
+        do_kill(conn->pn);
+        BREAK_NOW;
+    }
+    conn->pn->outstanding++;
+    conn_timer_reset(conn);
+
+BREAK_LABEL:
+
+    return;
+}
+
+static void conn_write_done(uv_write_t *req, int status) {
+    CONN *conn;
+
+    conn = CONTAINER_OF(req, CONN, write_req);
+    conn->pn->outstanding--;
+    ASSERT(conn->wrstate == c_busy);
+    conn->wrstate = c_done;
+    conn->result = status;
+
+    do_next(conn);
+}
+
+void conn_connect_done(uv_connect_t *req, int status) {
+    CONN *conn;
+
+    conn = CONTAINER_OF(req, CONN, t.connect_req);
+    conn->result = status;
+
+    conn->pn->outstanding--;
+    do_next(conn);
+}
+
+static void conn_close(CONN *conn) {
+    ASSERT(conn->rdstate != c_dead);
+    ASSERT(conn->wrstate != c_dead);
+    conn->rdstate = c_dead;
+    conn->wrstate = c_dead;
+    uv_handle_set_data((uv_handle_t*)&conn->timer_handle, conn);
+    uv_handle_set_data(&conn->handle.handle, conn);
+    uv_close(&conn->handle.handle, conn_close_done);
+    uv_close((uv_handle_t *) &conn->timer_handle, conn_close_done);
+}
+
+static void conn_close_done(uv_handle_t *handle) {
+    CONN *conn;
+
+    conn = uv_handle_get_data(handle);
+    do_next(conn);
+}
+
+
+void conn_timer_reset(CONN *conn) {
+    CHECK(0 == uv_timer_start(&conn->timer_handle,
+                              conn_timer_expire,
+                              conn->idle_timeout,
+                              0));
+}
+
+int conn_cycle(const char *who, CONN *a, CONN *b) {
+    if ( a->result < 0 ) {
+        if ( a->result != UV_EOF ) {
+            notify_msg_out(
+                1,
+                "[%d] %s error: %s [%s]",
+                a->pn->index,
+                who,
+                uv_strerror((int)a->result),
+                a->pn->link_info);
+        }
+
+        return -1;
     }
 
-    if (addr->sa_family == AF_INET6) {
-        addr6 = (const struct sockaddr_in6 *) addr;
-        p = (const uint32_t *) &addr6->sin6_addr.s6_addr;
-        a = ntohl_u(p[0]);
-        b = ntohl_u(p[1]);
-        c = ntohl_u(p[2]);
-        d = ntohl_u(p[3]);
-        if (a == 0 && b == 0 && c == 0 && d == 1) {
-            return 0;  /* "::1" style address. */
+    if ( b->result < 0 ) {
+        return -1;
+    }
+
+    if ( a->wrstate == c_done ) {
+        a->wrstate = c_stop;
+    }
+
+    /* The logic is as follows: read when we don't write and write when we don't
+     * read.  That gives us back-pressure handling for free because if the peer
+     * sends data faster than we consume it, TCP congestion control kicks in.
+     */
+    if ( a->wrstate == c_stop ) {
+        if ( b->rdstate == c_stop ) {
+            conn_read(b);
         }
-        if (a == 0 && b == 0 && c == 0xFFFF && (d >> 24u) == 0x7F) {
-            return 0;  /* "::ffff:127.x.x.x" style address. */
+        else if ( b->rdstate == c_done ) {
+            conn_write(a, b->us_buf.buf_base, (unsigned int)b->us_buf.buf_len);
+            b->rdstate = c_stop;  /* Triggers the call to conn_read() above. */
         }
-        return 1;
     }
 
     return 0;
+}
+
+
+int do_kill(PROXY_NODE *pn) {
+    int new_state;
+
+    if ( pn->outstanding != 0 ) {
+        /* Wait for uncomplete operations */
+        notify_msg_out(
+            2,
+            "[%d] Waitting outstanding operation: %d [%s]",
+            pn->index, pn->outstanding, pn->link_info);
+        new_state = s_kill;
+        BREAK_NOW;
+    }
+
+    if ( pn->state >= s_almost_dead_0 ) {
+        new_state = pn->state;
+        BREAK_NOW;
+    }
+
+    if ( pn->dn ) {
+        /* TODO:TEARDOWN DGRAM NODE */
+
+        pn->dn->pn = NULL;
+        pn->dn = NULL;
+    }
+
+    conn_close(&pn->incoming);
+    conn_close(&pn->outgoing);
+
+    new_state = s_almost_dead_1;
+
+BREAK_LABEL:
+
+    return new_state;
+}
+
+static int do_almost_dead(PROXY_NODE *pn) {
+    ASSERT(pn->state >= s_almost_dead_0);
+    return pn->state + 1;  /* Another finalizer completed. */
+}
+
+static int do_clear(PROXY_NODE *pn) {
+    handle_stream_teardown(pn);
+
+    if ( DEBUG_CHECKS ) {
+        memset(pn, -1, sizeof(*pn));
+    }
+    free(pn);
+
+    return 0;
+}
+
+static void conn_timer_expire(uv_timer_t *handle) {
+    CONN *conn;
+    CONN *incoming;
+    CONN *outgoing;
+
+    conn = CONTAINER_OF(handle, CONN, timer_handle);
+
+    incoming = &conn->pn->incoming;
+    outgoing = &conn->pn->outgoing;
+
+    switch ( conn->pn->state ) {
+    case s_handshake:
+    case s_req_start:
+    case s_req_parse:
+    case s_dgram_start:
+    case s_dgram_stop:
+        ASSERT(conn == incoming);
+        incoming->result = UV_ETIMEDOUT;
+        break;
+    case s_req_lookup:
+    case s_req_connect:
+    case s_proxy_start:
+        outgoing->result = UV_ETIMEDOUT;
+        break;
+    default:
+        conn->result = UV_ETIMEDOUT;  /* s_proxy, .. */
+        break;
+    }
+    do_next(conn);
+}
+
+void do_next(CONN *sender) {
+    PROXY_NODE *pn;
+    int new_state = s_max;
+
+    pn = sender->pn;
+
+    ASSERT(pn->state != s_dead);
+    switch (pn->state) {
+    case s_handshake:
+        new_state = do_handshake(pn);
+        break;
+    case s_req_start:
+        new_state = do_req_start(pn);
+        break;
+    case s_req_parse:
+        new_state = do_req_parse(pn);
+        break;
+    case s_req_lookup:
+        new_state = do_req_lookup(pn);
+        break;
+    case s_req_connect:
+        new_state = do_req_connect(pn);
+        break;
+    case s_dgram_start:
+        new_state = do_dgram_start(pn);
+        break;
+    case s_dgram_stop:
+        new_state = do_dgram_stop(pn);
+        break;
+    case s_proxy_start:
+        new_state = do_proxy_start(pn);
+        break;
+    case s_proxy:
+        new_state = do_proxy(sender);
+        break;
+    case s_kill:
+        new_state = do_kill(pn);
+        break;
+    case s_almost_dead_0:
+    case s_almost_dead_1:
+    case s_almost_dead_2:
+    case s_almost_dead_3:
+    case s_almost_dead_4:
+        new_state = do_almost_dead(pn);
+        break;
+    default:
+        UNREACHABLE();
+    }
+    pn->state = new_state;
+
+    if ( pn->state == s_dead )
+        do_clear(pn);
+}
+
+static void loop_walk_clear(uv_loop_t *loop) {
+    uv_walk(loop, loop_walk_cb, NULL);
+}
+
+static void loop_walk_cb(uv_handle_t* handle, void* arg) {
+    uv_handle_type type;
+    UVSOCKS5_BUF *us_buf;
+
+    (void)arg;
+
+    type = uv_handle_get_type(handle);
+    if ( UV_TCP == type ) {
+
+        uv_close(handle, loop_walk_close_done);
+    } else if ( UV_UDP == type ) {
+        us_buf = uv_handle_get_data(handle);
+
+        ASSERT(us_buf);
+        ASSERT(us_buf->buf_base);
+        free(us_buf->buf_base);
+        free(us_buf);
+
+        uv_close(handle, loop_walk_close_done);
+    } else {
+        uv_close(handle, NULL);
+    }
+}
+
+static void loop_walk_close_done(uv_handle_t* handle) {
+    free(handle);
 }

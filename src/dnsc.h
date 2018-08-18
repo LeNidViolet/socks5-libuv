@@ -1,4 +1,6 @@
-/* Copyright StrongLoop, Inc. All rights reserved.
+/**
+ *  Copyright 2018, raprepo.
+ *  Created by raprepo on 2018/8/7.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -18,10 +20,28 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <stdlib.h>
-#include "uvsocks5/uvsocks5.h"
-int main(int argc, char **argv) {
-    UVSOCKS5_CTX ctx = {0};
-    ssnetio_server_launch(&ctx);
-    return 0;
-}
+#ifndef SHADOWSOCKS_NETIO_DNSC_H
+#define SHADOWSOCKS_NETIO_DNSC_H
+
+#include <netinet/in.h>
+#include "list.h"
+
+typedef struct {
+    LIST_ENTRY list;
+
+    char host[256];
+
+    union{
+        struct sockaddr_in6 addr6;
+        struct sockaddr_in addr4;
+        struct sockaddr addr;
+    }t;
+} DNSC;
+
+int dnsc_init(void);
+DNSC *dnsc_find(char *host);
+DNSC *dnsc_add(char *host, struct sockaddr *addr);
+void dnsc_remove(DNSC *dnsc);
+void dnsc_clear(void);
+
+#endif //SHADOWSOCKS_NETIO_DNSC_H
