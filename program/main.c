@@ -19,9 +19,32 @@
  * IN THE SOFTWARE.
  */
 #include <stdlib.h>
+#include <stdio.h>
 #include "uvsocks5/uvsocks5.h"
+
+void on_msg(int level, const char *msg) {
+    printf("%d %s\n", level, msg);
+}
+
+void on_bind(const char *host, unsigned short port) {
+    printf("LISTENING ON %s:%d\n", host, port);
+}
+
+void on_stream_connection_made(ADDRESS_PAIR *addr, void *ctx) {
+    printf("CONNECTION MADE %s:%d -> %s:%d\n",
+        addr->local->host, addr->local->port,
+        addr->remote->host, addr->remote->port);
+}
+
 int main(int argc, char **argv) {
     UVSOCKS5_CTX ctx = {0};
+
+    ctx.callbacks.on_msg = on_msg;
+    ctx.callbacks.on_bind = on_bind;
+    ctx.callbacks.on_stream_connection_made = on_stream_connection_made;
+
     ssnetio_server_launch(&ctx);
+
+
     return 0;
 }

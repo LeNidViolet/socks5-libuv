@@ -25,6 +25,7 @@
 #include "dnsc.h"
 
 UVSOCKS5_CTX uvsocks5_ctx;
+unsigned int pn_outstanding = 0;
 
 static int server_run(UVSOCKS5_CTX *ctx);
 static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs);
@@ -32,13 +33,10 @@ static void on_connection(uv_stream_t *server, int status);
 static void conn_alloc(uv_handle_t *handle, size_t size, uv_buf_t *buf);
 static void conn_read_done(uv_stream_t *handle, ssize_t nread, const uv_buf_t *buf);
 static void conn_write_done(uv_write_t *req, int status);
-static void conn_close(CONN *conn);
 static void conn_close_done(uv_handle_t *handle);
 static void conn_timer_expire(uv_timer_t *handle);
-
-static int do_almost_dead(PROXY_NODE *pn);
-static int do_clear(PROXY_NODE *pn);
-
+static void conn_getaddrinfo_done(
+    uv_getaddrinfo_t *req, int status, struct addrinfo *ai);
 
 static void loop_walk_clear(uv_loop_t *loop);
 static void loop_walk_cb(uv_handle_t* handle, void* arg);
@@ -132,7 +130,6 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
             naddrs++;
         }
     }
-
     BREAK_ON_NULL(naddrs);
 
     port = uvsocks5_ctx.config.bind_port;
@@ -218,13 +215,14 @@ static void on_connection(uv_stream_t *server, int status) {
     pn->index = index++;
     pn->loop = loop;
     pn->ctx = NULL;
+    s5_init(&pn->parser);
 
     incoming = &pn->incoming;
     outgoing = &pn->outgoing;
 
     CHECK(0 == uv_tcp_init(loop, &incoming->handle.tcp));
     CHECK(0 == uv_accept(server, &incoming->handle.stream));
-    uv_handle_set_data((uv_handle_t *)&incoming->handle.tcp, incoming);
+    uv_handle_set_data(&incoming->handle.handle, incoming);
     incoming->pn = pn;
     incoming->result = 0;
     incoming->rdstate = c_stop;
@@ -233,7 +231,7 @@ static void on_connection(uv_stream_t *server, int status) {
     CHECK(0 == uv_timer_init(loop, &incoming->timer_handle));
 
     CHECK(0 == uv_tcp_init(loop, &outgoing->handle.tcp));
-    uv_handle_set_data((uv_handle_t *)&outgoing->handle.tcp, outgoing);
+    uv_handle_set_data(&outgoing->handle.handle, outgoing);
     outgoing->pn = pn;
     outgoing->result = 0;
     outgoing->rdstate = c_stop;
@@ -248,6 +246,8 @@ static void on_connection(uv_stream_t *server, int status) {
     outgoing->us_buf.buf_base = outgoing->t.raw;
     outgoing->us_buf.buf_len = sizeof(outgoing->t.raw);
 
+    pn_outstanding++;
+
     /* Wait for the initial packet. */
     conn_read(incoming);
 
@@ -257,15 +257,31 @@ BREAK_LABEL:
 }
 
 int conn_connect(CONN *conn) {
+    int ret;
+
     ASSERT(conn->t.addr.sa_family == AF_INET ||
            conn->t.addr.sa_family == AF_INET6);
-    conn_timer_reset(conn);
-    CHECK(0 == uv_tcp_connect(&conn->t.connect_req,
-                              &conn->handle.tcp,
-                              &conn->t.addr,
-                              conn_connect_done));
-    conn->pn->outstanding++;
-    return 0;
+
+    ret = uv_tcp_connect(&conn->t.connect_req,
+                         &conn->handle.tcp,
+                         &conn->t.addr,
+                         conn_connect_done);
+    if ( 0 == ret ) {
+        conn->pn->outstanding++;
+        conn_timer_reset(conn);
+    }
+
+    return ret;
+}
+
+void conn_connect_done(uv_connect_t *req, int status) {
+    CONN *conn;
+
+    conn = CONTAINER_OF(req, CONN, t.connect_req);
+    conn->result = status;
+
+    conn->pn->outstanding--;
+    do_next(conn);
 }
 
 static void conn_alloc(uv_handle_t *handle, size_t size, uv_buf_t *buf) {
@@ -347,17 +363,49 @@ static void conn_write_done(uv_write_t *req, int status) {
     do_next(conn);
 }
 
-void conn_connect_done(uv_connect_t *req, int status) {
+void conn_getaddrinfo(CONN *conn, const char *hostname) {
+    struct addrinfo hints;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    CHECK(0 == uv_getaddrinfo(conn->pn->loop,
+                              &conn->t.addrinfo_req,
+                              conn_getaddrinfo_done,
+                              hostname,
+                              NULL,
+                              &hints));
+    conn->pn->outstanding++;
+    conn_timer_reset(conn);
+}
+
+static void conn_getaddrinfo_done(
+    uv_getaddrinfo_t *req, int status, struct addrinfo *ai) {
     CONN *conn;
 
-    conn = CONTAINER_OF(req, CONN, t.connect_req);
+    conn = CONTAINER_OF(req, CONN, t.addrinfo_req);
     conn->result = status;
+
+    if (status == 0) {
+        /* FIXME(bnoordhuis) Should try all addresses. */
+        if (ai->ai_family == AF_INET) {
+            conn->t.addr4 = *(const struct sockaddr_in *) ai->ai_addr;
+        } else if (ai->ai_family == AF_INET6) {
+            conn->t.addr6 = *(const struct sockaddr_in6 *) ai->ai_addr;
+        } else {
+            UNREACHABLE();
+        }
+        set_sockaddr_port(&conn->t.addr, htons_u(conn->peer.port));
+    }
+
+    uv_freeaddrinfo(ai);
 
     conn->pn->outstanding--;
     do_next(conn);
 }
 
-static void conn_close(CONN *conn) {
+void conn_close(CONN *conn) {
     ASSERT(conn->rdstate != c_dead);
     ASSERT(conn->wrstate != c_dead);
     conn->rdstate = c_dead;
@@ -415,62 +463,10 @@ int conn_cycle(const char *who, CONN *a, CONN *b) {
             conn_read(b);
         }
         else if ( b->rdstate == c_done ) {
-            conn_write(a, b->us_buf.buf_base, (unsigned int)b->us_buf.buf_len);
+            conn_write(a, b->us_buf.buf_base, (unsigned int)b->result);
             b->rdstate = c_stop;  /* Triggers the call to conn_read() above. */
         }
     }
-
-    return 0;
-}
-
-
-int do_kill(PROXY_NODE *pn) {
-    int new_state;
-
-    if ( pn->outstanding != 0 ) {
-        /* Wait for uncomplete operations */
-        notify_msg_out(
-            2,
-            "[%d] Waitting outstanding operation: %d [%s]",
-            pn->index, pn->outstanding, pn->link_info);
-        new_state = s_kill;
-        BREAK_NOW;
-    }
-
-    if ( pn->state >= s_almost_dead_0 ) {
-        new_state = pn->state;
-        BREAK_NOW;
-    }
-
-    if ( pn->dn ) {
-        /* TODO:TEARDOWN DGRAM NODE */
-
-        pn->dn->pn = NULL;
-        pn->dn = NULL;
-    }
-
-    conn_close(&pn->incoming);
-    conn_close(&pn->outgoing);
-
-    new_state = s_almost_dead_1;
-
-BREAK_LABEL:
-
-    return new_state;
-}
-
-static int do_almost_dead(PROXY_NODE *pn) {
-    ASSERT(pn->state >= s_almost_dead_0);
-    return pn->state + 1;  /* Another finalizer completed. */
-}
-
-static int do_clear(PROXY_NODE *pn) {
-    handle_stream_teardown(pn);
-
-    if ( DEBUG_CHECKS ) {
-        memset(pn, -1, sizeof(*pn));
-    }
-    free(pn);
 
     return 0;
 }
@@ -504,60 +500,6 @@ static void conn_timer_expire(uv_timer_t *handle) {
         break;
     }
     do_next(conn);
-}
-
-void do_next(CONN *sender) {
-    PROXY_NODE *pn;
-    int new_state = s_max;
-
-    pn = sender->pn;
-
-    ASSERT(pn->state != s_dead);
-    switch (pn->state) {
-    case s_handshake:
-        new_state = do_handshake(pn);
-        break;
-    case s_req_start:
-        new_state = do_req_start(pn);
-        break;
-    case s_req_parse:
-        new_state = do_req_parse(pn);
-        break;
-    case s_req_lookup:
-        new_state = do_req_lookup(pn);
-        break;
-    case s_req_connect:
-        new_state = do_req_connect(pn);
-        break;
-    case s_dgram_start:
-        new_state = do_dgram_start(pn);
-        break;
-    case s_dgram_stop:
-        new_state = do_dgram_stop(pn);
-        break;
-    case s_proxy_start:
-        new_state = do_proxy_start(pn);
-        break;
-    case s_proxy:
-        new_state = do_proxy(sender);
-        break;
-    case s_kill:
-        new_state = do_kill(pn);
-        break;
-    case s_almost_dead_0:
-    case s_almost_dead_1:
-    case s_almost_dead_2:
-    case s_almost_dead_3:
-    case s_almost_dead_4:
-        new_state = do_almost_dead(pn);
-        break;
-    default:
-        UNREACHABLE();
-    }
-    pn->state = new_state;
-
-    if ( pn->state == s_dead )
-        do_clear(pn);
 }
 
 static void loop_walk_clear(uv_loop_t *loop) {

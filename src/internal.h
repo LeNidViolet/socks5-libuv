@@ -72,7 +72,6 @@ typedef struct {
         uv_handle_t handle;
         uv_stream_t stream;
         uv_tcp_t tcp;
-        uv_udp_t udp;
     } handle;
     uv_timer_t timer_handle;  /* For detecting timeouts. */
     uv_write_t write_req;
@@ -102,6 +101,7 @@ typedef struct PROXY_NODE {
     int outstanding;
 
     struct DGRAM_NODE *dn;   /* dgram node */
+    s5_ctx parser;
 
     char link_info[128];
 
@@ -236,11 +236,7 @@ enum {
     s5_invalid_version = -2,
     s5_invalid_method = -3
 };
-enum {
-    s5_cmd_connect = 1,
-    s5_cmd_bind = 2,
-    s5_cmd_udp_associate = 3
-};
+
 /* URIL.C */
 int str_sockaddr(const struct sockaddr *addr, ADDRESS *addr_s);
 void cpy_sockaddr(const struct sockaddr *src, struct sockaddr *dst);
@@ -262,27 +258,20 @@ void handle_dgram_teardown(void *ctx);
 void handle_plain_stream(CONN *conn);
 
 /* SERVER.C */
-int do_kill(PROXY_NODE *pn);
 void conn_write(CONN *conn, const void *data, unsigned int len);
 void conn_read(CONN *conn);
 void conn_timer_reset(CONN *conn);
 int conn_connect(CONN *conn);
 int conn_cycle(const char *who, CONN *a, CONN *b);
-void do_next(CONN *sender);
 void conn_connect_done(uv_connect_t *req, int status);
+void conn_getaddrinfo(CONN *conn, const char *hostname);
+void conn_close(CONN *conn);
 
 /* FLOW.C */
-int do_handshake(PROXY_NODE *pn);
-int do_req_start(PROXY_NODE *pn);
-int do_req_parse(PROXY_NODE *pn);
-int do_req_connect(PROXY_NODE *pn);
-int do_proxy_start(PROXY_NODE *pn);
-int do_proxy(CONN *sender);
-int do_dgram_start(PROXY_NODE *pn);
-int do_dgram_stop(PROXY_NODE *pn);
-int do_req_lookup(PROXY_NODE *pn);
-
+int do_kill(PROXY_NODE *pn);
+void do_next(CONN *sender);
 
 extern UVSOCKS5_CTX uvsocks5_ctx;
+extern unsigned int pn_outstanding;
 
 #endif //UVSOCKS5_INTERNAL_H

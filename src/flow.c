@@ -27,33 +27,31 @@
 #include "uvsocks5/uvsocks5.h"
 #include "internal.h"
 
-static void conn_getaddrinfo(CONN *conn, const char *hostname);
-static void conn_getaddrinfo_done(
-    uv_getaddrinfo_t *req, int status, struct addrinfo *ai);
-static int do_req_connect_start(PROXY_NODE *pn);
+static unsigned int dn_outstanding = 0;
 
+static int do_handshake(PROXY_NODE *pn);
+static int do_req_start(PROXY_NODE *pn);
+static int do_req_parse(PROXY_NODE *pn);
+static int do_req_connect(PROXY_NODE *pn);
+static int do_proxy_start(PROXY_NODE *pn);
+static int do_proxy(CONN *sender);
+static int do_dgram_start(PROXY_NODE *pn);
+static int do_dgram_stop(PROXY_NODE *pn);
+static int do_req_lookup(PROXY_NODE *pn);
+static int do_req_connect_start(PROXY_NODE *pn);
 static int do_dgram_response(PROXY_NODE *pn);
+static int do_almost_dead(PROXY_NODE *pn);
+static int do_clear(PROXY_NODE *pn);
+
 static void dgram_read(uv_udp_t *udp_handle, DGRAM_NODE *dn);
 static void dgram_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf);
-static void dgram_read_done(
-    uv_udp_t *handle,
-    ssize_t nread,
-    const uv_buf_t *buf,
-    const struct sockaddr *addr,
-    unsigned flags);
-    static void dgram_timer_reset(DGRAM_NODE *dn);
-static void dgram_read_done_l(
-    uv_udp_t *handle,
-    ssize_t nread,
-    const uv_buf_t *buf,
-    const struct sockaddr *addr,
-    unsigned flags);
-static void dgram_read_done_r(
-    uv_udp_t *handle,
-    ssize_t nread,
-    const uv_buf_t *buf,
-    const struct sockaddr *addr,
-    unsigned flags);
+static void dgram_read_done(uv_udp_t *handle, ssize_t nread,
+    const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags);
+static void dgram_timer_reset(DGRAM_NODE *dn);
+static void dgram_read_done_l(uv_udp_t *handle, ssize_t nread,
+    const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags);
+static void dgram_read_done_r(uv_udp_t *handle, ssize_t nread,
+    const uv_buf_t *buf, const struct sockaddr *addr, unsigned flags);
 static void dgram_write_to_remote(DGRAM_LOCAL *dgraml);
 static void dgram_write_to_local(DGRAM_REMOTE *dgramr);
 static void dgram_write_done(uv_udp_send_t* req, int status);
@@ -64,9 +62,66 @@ static void dgram_getaddrinfo_done(
     uv_getaddrinfo_t *req, int status, struct addrinfo *addrs);
 
 
-int do_handshake(PROXY_NODE *pn) {
+void do_next(CONN *sender) {
+    PROXY_NODE *pn;
+    int new_state = s_max;
+
+    pn = sender->pn;
+
+    ASSERT(pn->state != s_dead);
+    switch (pn->state) {
+    case s_handshake:
+        new_state = do_handshake(pn);
+        break;
+    case s_req_start:
+        new_state = do_req_start(pn);
+        break;
+    case s_req_parse:
+        new_state = do_req_parse(pn);
+        break;
+    case s_req_lookup:
+        new_state = do_req_lookup(pn);
+        break;
+    case s_req_connect:
+        new_state = do_req_connect(pn);
+        break;
+    case s_dgram_start:
+        new_state = do_dgram_start(pn);
+        break;
+    case s_dgram_stop:
+        new_state = do_dgram_stop(pn);
+        break;
+    case s_proxy_start:
+        new_state = do_proxy_start(pn);
+        break;
+    case s_proxy:
+        new_state = do_proxy(sender);
+        break;
+    case s_kill:
+        new_state = do_kill(pn);
+        break;
+    case s_almost_dead_0:
+    case s_almost_dead_1:
+    case s_almost_dead_2:
+    case s_almost_dead_3:
+    case s_almost_dead_4:
+        new_state = do_almost_dead(pn);
+        break;
+    default:
+        UNREACHABLE();
+    }
+    pn->state = new_state;
+
+    if ( pn->state == s_dead )
+        do_clear(pn);
+}
+
+static int do_handshake(PROXY_NODE *pn) {
     CONN *incoming;
-    int new_state = s_max, err;
+    int new_state, err;
+    uint8_t *data_pos;
+    size_t data_len;
+    unsigned int methods;
 
     incoming = &pn->incoming;
 
@@ -81,23 +136,34 @@ int do_handshake(PROXY_NODE *pn) {
     ASSERT(incoming->wrstate == c_stop);
     incoming->rdstate = c_stop;
 
-    err = s5_simple_check(incoming->us_buf.buf_base, (size_t)incoming->result);
-    switch ( err ) {
-    case s5_invalid_version:
-    case s5_invalid_length:
+    data_pos = (uint8_t *)incoming->us_buf.buf_base,
+    data_len = (size_t)incoming->result;
+    err = s5_parse(&pn->parser, &data_pos, &data_len);
+    if ( s5_ok == err ) {
+        conn_read(incoming);
+        new_state = s_req_parse;
+        BREAK_NOW;
+    }
+
+    if ( data_len != 0 ) {
+        notify_msg_out(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
         new_state = do_kill(pn);
-        break;
-    case s5_invalid_method:
-        conn_write(incoming, "\5\255", 2);  /* No acceptable auth. */
-        new_state = s_kill;
-        break;
-    case 0:
+        BREAK_NOW;
+    }
+
+    if ( err != s5_auth_select ) {
+        new_state = do_kill(pn);
+        BREAK_NOW;
+    }
+
+    methods = s5_auth_methods(&pn->parser);
+    if ( methods & (unsigned int)S5_AUTH_NONE ) {
+        s5_select_auth(&pn->parser, S5_AUTH_NONE);
         conn_write(incoming, "\5\0", 2);  /* No auth required. */
         new_state = s_req_start;
-        break;
-    default:
-        UNREACHABLE();
-        break;
+    } else {
+        conn_write(incoming, "\5\255", 2);  /* No acceptable auth. */
+        new_state = s_kill;
     }
 
 BREAK_LABEL:
@@ -105,7 +171,7 @@ BREAK_LABEL:
     return new_state;
 }
 
-int do_req_start(PROXY_NODE *pn) {
+static int do_req_start(PROXY_NODE *pn) {
     CONN *incoming;
     int new_state;
 
@@ -129,13 +195,13 @@ BREAK_LABEL:
     return new_state;
 }
 
-int do_req_parse(PROXY_NODE *pn) {
+static int do_req_parse(PROXY_NODE *pn) {
     CONN *incoming;
     CONN *outgoing;
     int new_state, err;
-    s5_ctx parser;
-    uint8_t *data;
-    size_t size;
+    s5_ctx *parser;
+    uint8_t *data_pos;
+    size_t data_len;
 
     incoming = &pn->incoming;
     outgoing = &pn->outgoing;
@@ -151,42 +217,50 @@ int do_req_parse(PROXY_NODE *pn) {
     ASSERT(outgoing->wrstate == c_stop);
     incoming->rdstate = c_stop;
 
-    data = (uint8_t *)incoming->us_buf.buf_base;
-    size = (size_t)incoming->result;
-    err = s5_parse(&parser, &data, &size);
+    parser = &pn->parser;
+    data_pos = (uint8_t *)incoming->us_buf.buf_base;
+    data_len = (size_t)incoming->result;
+    err = s5_parse(parser, &data_pos, &data_len);
+    if ( s5_ok == err ) {
+        conn_read(incoming);
+        new_state = s_req_parse;
+        BREAK_NOW;
+    }
 
-    if (size != 0) {
-        notify_msg_out(1, "[%d] Junk in equest %u", pn->index, (unsigned)size);
+    if ( 0 != data_len ) {
+        notify_msg_out(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
-    if (err != s5_exec_cmd) {
+    if ( s5_exec_cmd != err ) {
         notify_msg_out(1, "[%d] Request error: %s", pn->index, s5_strerror((s5_err)err));
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
-    if ( s5_cmd_bind == parser.cmd ) {
+    if ( s5_cmd_tcp_bind == parser->cmd ) {
         /* Not supported */
         notify_msg_out(1, "[%d] Bind requests are not supported.", pn->index);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
-    if ( s5_cmd_udp_associate == parser.cmd ) {
+
+    if ( s5_cmd_udp_assoc == parser->cmd ) {
         new_state = do_dgram_response(pn);
         BREAK_NOW;
     }
-    if ( s5_cmd_connect != parser.cmd ) {
-        notify_msg_out(1, "[%d] Unknow s5 command %d.", pn->index, parser.cmd);
+
+    if ( s5_cmd_tcp_connect != parser->cmd ) {
+        notify_msg_out(1, "[%d] Unknow s5 command %d.", pn->index, parser->cmd);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
-    s5_addr_copy(&parser, &outgoing->t.addr, &outgoing->peer);
+    s5_addr_copy(parser, &outgoing->t.addr, &outgoing->peer);
 
-    if ( parser.atyp == s5_atyp_host ) {
-        conn_getaddrinfo(outgoing, (const char *)parser.daddr);
+    if ( parser->atyp == s5_atyp_host ) {
+        conn_getaddrinfo(outgoing, (const char *)parser->daddr);
         new_state = s_req_lookup;
         BREAK_NOW;
     }
@@ -198,8 +272,7 @@ BREAK_LABEL:
     return new_state;
 }
 
-
-int do_req_lookup(PROXY_NODE *pn) {
+static int do_req_lookup(PROXY_NODE *pn) {
     CONN *incoming;
     CONN *outgoing;
     int ret;
@@ -222,66 +295,11 @@ int do_req_lookup(PROXY_NODE *pn) {
     ASSERT(outgoing->rdstate == c_stop);
     ASSERT(outgoing->wrstate == c_stop);
 
-    ASSERT(outgoing->t.addr.sa_family == AF_INET ||
-           outgoing->t.addr.sa_family == AF_INET6);
-
-    if ( 0 != uv_tcp_connect(&outgoing->t.connect_req,
-                             &outgoing->handle.tcp,
-                             &outgoing->t.addr,
-                             conn_connect_done) ) {
-        ret = do_kill(pn);
-        BREAK_NOW;
-    }
-
-    pn->outstanding++;
-    conn_timer_reset(outgoing);
-
-    ret = s_req_connect;
+    ret = do_req_connect_start(pn);
 
 BREAK_LABEL:
 
     return ret;
-}
-
-static void conn_getaddrinfo(CONN *conn, const char *hostname) {
-    struct addrinfo hints;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    CHECK(0 == uv_getaddrinfo(conn->pn->loop,
-                              &conn->t.addrinfo_req,
-                              conn_getaddrinfo_done,
-                              hostname,
-                              NULL,
-                              &hints));
-    conn->pn->outstanding++;
-    conn_timer_reset(conn);
-}
-
-static void conn_getaddrinfo_done(
-    uv_getaddrinfo_t *req, int status, struct addrinfo *ai) {
-    CONN *conn;
-
-    conn = CONTAINER_OF(req, CONN, t.addrinfo_req);
-    conn->result = status;
-
-    if (status == 0) {
-        /* FIXME(bnoordhuis) Should try all addresses. */
-        if (ai->ai_family == AF_INET) {
-            conn->t.addr4 = *(const struct sockaddr_in *) ai->ai_addr;
-        } else if (ai->ai_family == AF_INET6) {
-            conn->t.addr6 = *(const struct sockaddr_in6 *) ai->ai_addr;
-        } else {
-            UNREACHABLE();
-        }
-    }
-
-    uv_freeaddrinfo(ai);
-
-    conn->pn->outstanding--;
-    do_next(conn);
 }
 
 static int do_req_connect_start(PROXY_NODE *pn) {
@@ -297,7 +315,7 @@ static int do_req_connect_start(PROXY_NODE *pn) {
     ASSERT(outgoing->wrstate == c_stop);
 
     err = conn_connect(outgoing);
-    if (err != 0) {
+    if ( err != 0 ) {
         notify_msg_out(1, "[%d] Connect error: %s", pn->index, uv_strerror(err));
         new_state = do_kill(pn);
     } else {
@@ -307,7 +325,7 @@ static int do_req_connect_start(PROXY_NODE *pn) {
     return new_state;
 }
 
-int do_req_connect(PROXY_NODE *pn) {
+static int do_req_connect(PROXY_NODE *pn) {
     CONN *incoming;
     CONN *outgoing;
     int new_state;
@@ -324,8 +342,10 @@ int do_req_connect(PROXY_NODE *pn) {
     if ( outgoing->result != 0 ) {
         notify_msg_out(
             1,
-            "[%d] Connect error: %s",
+            "[%d] Connect %s:%d error: %s",
             pn->index,
+            outgoing->peer.host,
+            outgoing->peer.port,
             uv_strerror((int)outgoing->result));
         new_state = do_kill(pn);
         BREAK_NOW;
@@ -367,7 +387,7 @@ BREAK_LABEL:
     return new_state;
 }
 
-int do_proxy_start(PROXY_NODE *pn) {
+static int do_proxy_start(PROXY_NODE *pn) {
     CONN *incoming;
     CONN *outgoing;
     int new_state;
@@ -397,7 +417,7 @@ BREAK_LABEL:
 }
 
 /* Proxy incoming data back and forth. */
-int do_proxy(CONN *sender) {
+static int do_proxy(CONN *sender) {
     int new_state;
     CONN *incoming;
     CONN *outgoing;
@@ -410,12 +430,12 @@ int do_proxy(CONN *sender) {
         handle_plain_stream(sender);
     }
 
-    if ( conn_cycle("client", incoming, outgoing)) {
+    if ( conn_cycle("client", incoming, outgoing) ) {
         new_state = do_kill(incoming->pn);
         BREAK_NOW;
     }
 
-    if ( conn_cycle("upstream", outgoing, incoming)) {
+    if ( conn_cycle("upstream", outgoing, incoming) ) {
         new_state = do_kill(incoming->pn);
         BREAK_NOW;
     }
@@ -427,9 +447,62 @@ BREAK_LABEL:
     return new_state;
 }
 
+int do_kill(PROXY_NODE *pn) {
+    int new_state;
 
+    if ( pn->outstanding != 0 ) {
+        /* Wait for uncomplete operations */
+        notify_msg_out(
+            2,
+            "[%d] Waitting outstanding operation: %d [%s]",
+            pn->index, pn->outstanding, pn->link_info);
+        new_state = s_kill;
+        BREAK_NOW;
+    }
 
-int do_dgram_response(PROXY_NODE *pn) {
+    if ( pn->state >= s_almost_dead_0 ) {
+        new_state = pn->state;
+        BREAK_NOW;
+    }
+
+    if ( pn->dn ) {
+        if ( pn->dn->pn )
+            pn->dn->pn = NULL;
+        dgram_tear_down(pn->dn);
+        pn->dn = NULL;
+    }
+
+    conn_close(&pn->incoming);
+    conn_close(&pn->outgoing);
+
+    new_state = s_almost_dead_1;
+
+BREAK_LABEL:
+
+    return new_state;
+}
+
+static int do_almost_dead(PROXY_NODE *pn) {
+    ASSERT(pn->state >= s_almost_dead_0);
+    return pn->state + 1;  /* Another finalizer completed. */
+}
+
+static int do_clear(PROXY_NODE *pn) {
+    handle_stream_teardown(pn);
+
+    if ( DEBUG_CHECKS ) {
+        memset(pn, -1, sizeof(*pn));
+    }
+    free(pn);
+
+    pn_outstanding--;
+    if ( 0 == pn_outstanding )
+        printf("PN OUTSTANDING BACK TO ZERO\n");
+
+    return 0;
+}
+
+static int do_dgram_response(PROXY_NODE *pn) {
     int ret;
     CONN *incoming;
     DGRAM_NODE *dn;
@@ -502,6 +575,8 @@ int do_dgram_response(PROXY_NODE *pn) {
     dn->pn = pn;
     conn_write(incoming, incoming->us_buf.buf_base, (unsigned int)(p - incoming->us_buf.buf_base));
 
+    dn_outstanding++;
+
     ret = s_dgram_start;
 
 BREAK_LABEL:
@@ -509,7 +584,7 @@ BREAK_LABEL:
     return ret;
 }
 
-int do_dgram_start(PROXY_NODE *pn) {
+static int do_dgram_start(PROXY_NODE *pn) {
     CONN *incoming;
     int ret;
 
@@ -537,7 +612,7 @@ BREAK_LABEL:
     return ret;
 }
 
-int do_dgram_stop(PROXY_NODE *pn) {
+static int do_dgram_stop(PROXY_NODE *pn) {
     CONN *incoming;
 
     incoming = &pn->incoming;
@@ -564,17 +639,25 @@ static void dgram_read(uv_udp_t *udp_handle, DGRAM_NODE *dn) {
 
 static void dgram_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     void *p, *op;
+    DGRAM_LOCAL *dgraml;
+    DGRAM_REMOTE *dgramr;
 
     (void)suggested_size;
 
     p = uv_handle_get_data(handle);
     op = CONTAINER_OF(handle, DGRAM_LOCAL, handle.udp);
     if ( op == p ) {
-        buf->base = ((DGRAM_LOCAL*)p)->us_buf.buf_base;
-        buf->len = ((DGRAM_LOCAL*)p)->us_buf.buf_len;
+        dgraml = (DGRAM_LOCAL *)p;
+        dgraml->us_buf.buf_base = dgraml->slab;
+        dgraml->us_buf.buf_len = sizeof(dgraml->slab);
+        buf->base = dgraml->slab;
+        buf->len = sizeof(dgraml->slab);
     } else {
-        buf->base = ((DGRAM_REMOTE*)p)->us_buf.buf_base;
-        buf->len = ((DGRAM_REMOTE*)p)->us_buf.buf_len;
+        dgramr = (DGRAM_REMOTE *)p;
+        dgramr->us_buf.buf_base = dgramr->slab;
+        dgramr->us_buf.buf_len = sizeof(dgramr->slab);
+        buf->base = dgramr->slab;
+        buf->len = sizeof(dgramr->slab);
     }
 }
 
@@ -621,7 +704,11 @@ static void dgram_read_done_l(
 
     (void)flags;
 
-    if ( nread <= 0 ) {
+    if ( nread == 0 ) {
+        BREAK_NOW;
+    }
+
+    if ( nread < 0 ) {
         notify_msg_out(1, "Dgram read failed(local): %s", uv_strerror((int)nread));
         BREAK_NOW;
     }
@@ -678,6 +765,8 @@ static void dgram_read_done_l(
         }
     }
 
+    uv_udp_recv_stop(&dgraml->handle.udp);
+
     /* Update address range */
     dgraml->us_buf.buf_base = (char*)data_pos;
     dgraml->us_buf.buf_len = data_len;
@@ -712,7 +801,6 @@ static void dgram_read_done_l(
     }
     /* SEND OUT */
     dgram_write_to_remote(dgraml);
-    uv_udp_recv_stop(&dgraml->handle.udp);
 
 BREAK_LABEL:
 
@@ -733,7 +821,11 @@ static void dgram_read_done_r(
 
     (void)flags;
 
-    if ( nread <= 0 ) {
+    if ( nread == 0 ) {
+        BREAK_NOW;
+    }
+
+    if ( nread < 0 ) {
         notify_msg_out(1, "Dgram read failed(remote): %s", uv_strerror((int)nread));
         BREAK_NOW;
     }
@@ -783,6 +875,8 @@ static void dgram_read_done_r(
         memcpy(p, &in6->sin6_port, sizeof(in6->sin6_port));
     }
 
+    uv_udp_recv_stop(&dgramr->handle.udp);
+
     dgramr->us_buf.buf_base = buf->base;
     dgramr->us_buf.buf_len = (size_t)(nread + hdr_len);
     dgram_write_to_local(dgramr);
@@ -791,7 +885,6 @@ BREAK_LABEL:
 
     return;
 }
-
 
 static void dgram_getaddrinfo_done(
     uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
@@ -820,29 +913,12 @@ static void dgram_getaddrinfo_done(
     uv_freeaddrinfo(addrs);
 }
 
-
 static void dgram_write_to_remote(DGRAM_LOCAL *dgraml) {
+    DGRAM_REMOTE *dgramr;
     uv_buf_t buf;
+
     buf = uv_buf_init(dgraml->us_buf.buf_base, (unsigned int)dgraml->us_buf.buf_len);
-
-    uv_req_set_data((uv_req_t*)&dgraml->req_send, dgraml);
-    if ( 0 != uv_udp_send(
-        &dgraml->req_send,
-        &dgraml->handle.udp,
-        &buf,
-        1,
-        &dgraml->addr.addr,
-        dgram_write_done) ) {
-        dgram_tear_down(dgraml->dn);
-    } else {
-        dgram_timer_reset(dgraml->dn);
-        conn_timer_reset(&dgraml->dn->pn->incoming);
-    }
-}
-
-static void dgram_write_to_local(DGRAM_REMOTE *dgramr) {
-    uv_buf_t buf;
-    buf = uv_buf_init(dgramr->us_buf.buf_base, (unsigned int)dgramr->us_buf.buf_len);
+    dgramr = &dgraml->dn->outgoing;
 
     uv_req_set_data((uv_req_t*)&dgramr->req_send, dgramr);
     if ( 0 != uv_udp_send(
@@ -856,6 +932,28 @@ static void dgram_write_to_local(DGRAM_REMOTE *dgramr) {
     } else {
         dgram_timer_reset(dgramr->dn);
         conn_timer_reset(&dgramr->dn->pn->incoming);
+    }
+}
+
+static void dgram_write_to_local(DGRAM_REMOTE *dgramr) {
+    DGRAM_LOCAL *dgraml;
+    uv_buf_t buf;
+
+    buf = uv_buf_init(dgramr->us_buf.buf_base, (unsigned int)dgramr->us_buf.buf_len);
+    dgraml = &dgramr->dn->incoming;
+
+    uv_req_set_data((uv_req_t*)&dgraml->req_send, dgraml);
+    if ( 0 != uv_udp_send(
+        &dgraml->req_send,
+        &dgraml->handle.udp,
+        &buf,
+        1,
+        &dgraml->addr.addr,
+        dgram_write_done) ) {
+        dgram_tear_down(dgraml->dn);
+    } else {
+        dgram_timer_reset(dgraml->dn);
+        conn_timer_reset(&dgraml->dn->pn->incoming);
     }
 }
 
@@ -895,9 +993,12 @@ static void dgram_timer_expire(uv_timer_t *handle) {
 
 static void dgram_tear_down(DGRAM_NODE *dn) {
     if ( dn->state < u_closing0 ) {
-        dn->pn->dn = NULL;
-        do_kill(dn->pn);
-        dn->pn = NULL;
+        if ( dn->pn ) {
+            if ( dn->pn->dn )
+                dn->pn->dn = NULL;
+            do_kill(dn->pn);
+            dn->pn = NULL;
+        }
 
         dn->state = u_closing0;
         uv_close(&dn->incoming.handle.handle, dgram_close_done);
@@ -925,5 +1026,9 @@ static void dgram_close_done(uv_handle_t* handle) {
         if ( DEBUG_CHECKS )
             memset(dn, 0xff, sizeof(*dn));
         free(dn);
+
+        dn_outstanding--;
+        if ( 0 == dn_outstanding )
+            printf("DN OUTSTANDING BACK TO ZERO\n");
     }
 }
