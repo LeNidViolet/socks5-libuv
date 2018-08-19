@@ -496,8 +496,6 @@ static int do_clear(PROXY_NODE *pn) {
     free(pn);
 
     pn_outstanding--;
-    if ( 0 == pn_outstanding )
-        printf("PN OUTSTANDING BACK TO ZERO\n");
 
     return 0;
 }
@@ -1033,7 +1031,5 @@ static void dgram_close_done(uv_handle_t* handle) {
         free(dn);
 
         dn_outstanding--;
-        if ( 0 == dn_outstanding )
-            printf("DN OUTSTANDING BACK TO ZERO\n");
     }
 }
