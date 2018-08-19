@@ -137,3 +137,14 @@ BREAK_LABEL:
 
     return;
 }
+
+void handle_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
+
+    BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_plain_dgram);
+
+    uvsocks5_ctx.callbacks.on_plain_dgram(buf, direct, ctx);
+
+BREAK_LABEL:
+
+    return ;
+}

@@ -751,7 +751,7 @@ static void dgram_read_done_l(
         /* Emit dgram session */
         cpy_sockaddr(addr, &dgraml->addr.addr);
         str_sockaddr(addr, &local);
-        handle_new_dgram(&local, &remote, &dgraml->dn->ctx);
+        handle_new_dgram(&local, &remote, &dgramr->ctx);
 
         snprintf(dgramr->link_info, sizeof(dgramr->link_info),
             "%s:%d -> %s:%d",
@@ -770,6 +770,7 @@ static void dgram_read_done_l(
     /* Update address range */
     dgraml->us_buf.buf_base = (char*)data_pos;
     dgraml->us_buf.buf_len = data_len;
+    handle_plain_dgram(&dgraml->us_buf, STREAM_UP, dgramr->ctx);
 
     if ( 0 == dgramr->addr.addr.sa_family ) {
         if ( parser.atyp == s5_atyp_host ) {
@@ -845,6 +846,10 @@ static void dgram_read_done_r(
         ASSERT(in6->sin6_port == dgramr->addr.addr6.sin6_port);
         ASSERT(0 == memcmp(&in6->sin6_addr, &dgramr->addr.addr6.sin6_addr, sizeof(in6->sin6_addr)));
     }
+
+    dgramr->us_buf.buf_base = buf->base;
+    dgramr->us_buf.buf_len = (size_t)nread;
+    handle_plain_dgram(&dgramr->us_buf, STREAM_DOWN, dgramr->ctx);
 
     /* shift to socks5 hdr */
     hdr_len = addr->sa_family == AF_INET ? S5_IPV4_UDP_SEND_HDR_LEN : S5_IPV6_UDP_SEND_HDR_LEN;
@@ -1021,7 +1026,7 @@ static void dgram_close_done(uv_handle_t* handle) {
 
     dn->state++;
     if ( u_dead == dn->state ) {
-        handle_dgram_teardown(dn->ctx);
+        handle_dgram_teardown(dn->outgoing.ctx);
 
         if ( DEBUG_CHECKS )
             memset(dn, 0xff, sizeof(*dn));

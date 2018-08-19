@@ -140,6 +140,7 @@ typedef struct DGRAM_LOCAL{
 typedef struct DGRAM_REMOTE{
     int state;
 
+    /* TODO: DGRAM ONE TO MORE */
 //    struct DGRAMS *next;
     struct DGRAM_NODE *dn;
 
@@ -175,8 +176,6 @@ typedef struct DGRAM_NODE{
     PROXY_NODE *pn;
 
     uv_timer_t timer;
-
-    void *ctx;
 }DGRAM_NODE;
 
 
@@ -256,6 +255,7 @@ void handle_stream_teardown(PROXY_NODE *pn);
 void handle_new_dgram(ADDRESS *local, ADDRESS *remote, void **ctx);
 void handle_dgram_teardown(void *ctx);
 void handle_plain_stream(CONN *conn);
+void handle_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx);
 
 /* SERVER.C */
 void conn_write(CONN *conn, const void *data, unsigned int len);

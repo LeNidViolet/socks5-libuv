@@ -20,7 +20,20 @@
  */
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include "uvsocks5/uvsocks5.h"
+
+typedef struct {
+    unsigned int index;
+    ADDRESS local;
+    ADDRESS remote;
+} STREAM_SESSION;
+
+typedef struct {
+    unsigned int index;
+    ADDRESS local;
+    ADDRESS remote;
+} DGRAM_SESSION;
 
 void on_msg(int level, const char *msg) {
     printf("%d %s\n", level, msg);
@@ -31,9 +44,89 @@ void on_bind(const char *host, unsigned short port) {
 }
 
 void on_stream_connection_made(ADDRESS_PAIR *addr, void *ctx) {
-    printf("CONNECTION MADE %s:%d -> %s:%d\n",
+    STREAM_SESSION *ss;
+
+    ss = (STREAM_SESSION*)ctx;
+
+    ss->local = *addr->local;
+    ss->remote = *addr->remote;
+
+    printf("[%d] CONNECTION MADE %s:%d -> %s:%d\n",
+        ss->index,
         addr->local->host, addr->local->port,
         addr->remote->host, addr->remote->port);
+}
+
+void on_new_stream(ADDRESS *addr, void **ctx) {
+    static unsigned int index = 0;
+    STREAM_SESSION *ss;
+
+    (void)addr;
+
+    ss = malloc(sizeof(*ss));
+    memset(ss, 0, sizeof(*ss));
+    ss->index = index++;
+
+    *ctx = ss;
+}
+
+void on_stream_teardown(void *ctx) {
+    STREAM_SESSION *ss;
+
+    ss = (STREAM_SESSION*)ctx;
+
+    printf("CONNECTION LOST %s:%d -> %s:%d\n",
+           ss->local.host, ss->local.port,
+           ss->remote.host, ss->remote.port);
+    free(ss);
+}
+
+void on_new_dgram(ADDRESS_PAIR *addr, void **ctx) {
+    static unsigned int index = 0;
+    DGRAM_SESSION *ds;
+
+    ds = malloc(sizeof(*ds));
+    memset(ds, 0, sizeof(*ds));
+    ds->index = index++;
+
+    ds->local = *addr->local;
+    ds->remote = *addr->remote;
+
+    printf("[%d] DGRAM MADE %s:%d -> %s:%d\n",
+           ds->index,
+           addr->local->host, addr->local->port,
+           addr->remote->host, addr->remote->port);
+
+    *ctx = ds;
+}
+
+void on_dgram_teardown(void *ctx) {
+    DGRAM_SESSION *ds;
+
+    ds = (DGRAM_SESSION*)ctx;
+
+    printf("DGRAM LOST %s:%d -> %s:%d\n",
+           ds->local.host, ds->local.port,
+           ds->remote.host, ds->remote.port);
+    free(ds);
+}
+
+void on_plain_stream(UVSOCKS5_BUF *buf, int direct, void *ctx) {
+    STREAM_SESSION *ss;
+    char *desc = direct == STREAM_UP ? "==>" : "<==";
+
+    ss = (STREAM_SESSION*)ctx;
+
+    printf("[%d] STREAM %s %.*s\n", ss->index, desc, 10, buf->buf_base);
+}
+
+void on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
+    DGRAM_SESSION *ds;
+    char *desc = direct == STREAM_UP ? "==>" : "<==";
+
+    ds = (DGRAM_SESSION*)ctx;
+
+    printf("[%d] DGRAM %s %.*s\n", ds->index, desc, 10, buf->buf_base);
 }
 
 int main(int argc, char **argv) {
@@ -43,8 +136,16 @@ int main(int argc, char **argv) {
     ctx.callbacks.on_bind = on_bind;
     ctx.callbacks.on_stream_connection_made = on_stream_connection_made;
 
-    ssnetio_server_launch(&ctx);
+    ctx.callbacks.on_new_stream = on_new_stream;
+    ctx.callbacks.on_stream_teardown = on_stream_teardown;
 
+    ctx.callbacks.on_new_dgram = on_new_dgram;
+    ctx.callbacks.on_dgram_teardown = on_dgram_teardown;
+
+    ctx.callbacks.on_plain_stream = on_plain_stream;
+    ctx.callbacks.on_plain_dgram = on_plain_dgram;
+
+    ssnetio_server_launch(&ctx);
 
     return 0;
 }
