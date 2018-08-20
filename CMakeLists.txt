@@ -3,34 +3,36 @@ PROJECT(uvsocks5 C)
 
 SET(CMAKE_C_STANDARD 99)
 
-OPTION(ENABLE_PROGRAM "Build socks5 program." OFF)
-
+OPTION(ENABLE_PROGRAMS "Build socks5 program." OFF)
 
 # LIBUV DIR
-SET(LIBUV_DIR ${CMAKE_SOURCE_DIR}/libuv)
+IF( DEFINED LIBUV_DIR )
+    MESSAGE(STATUS "EXISTING LIBUV DIR: " ${LIBUV_DIR})
+ELSE()
+    SET(LIBUV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libuv)
+    # ADD LIBUV PROJECT
+    ADD_SUBDIRECTORY(${LIBUV_DIR} ${CMAKE_CURRENT_BINARY_DIR}/libuv)
+ENDIF()
 
 SET(SOCKS5LIBUV_ADDTION_HDR
         ${LIBUV_DIR}/include
-        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
         )
 
 INCLUDE_DIRECTORIES(${SOCKS5LIBUV_ADDTION_HDR})
 
-# ADD LIBUV PROJECT
-ADD_SUBDIRECTORY(${LIBUV_DIR})
-
-IF( ENABLE_PROGRAM )
-    ADD_SUBDIRECTORY(program)
+IF( ENABLE_PROGRAMS )
+    ADD_SUBDIRECTORY(program ${CMAKE_CURRENT_BINARY_DIR}/program)
 ENDIF()
 
 SET(SOCKS5LIBUV_SRCS
-        src/s5.c
-        src/server.c
-        src/util.c
-        src/base.c
-        src/list.c
-        src/dnsc.c
-        src/flow.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/s5.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/server.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/util.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/base.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/list.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/dnsc.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/flow.c
 )
 
 ADD_LIBRARY(uvsocks5 STATIC ${SOCKS5LIBUV_SRCS})
