@@ -25,51 +25,17 @@
 
 #include <stddef.h>
 #include <netinet/in.h>
+#include "hdr.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define DEFAULT_BIND_HOST        ("0.0.0.0")
-#define DEFAULT_BIND_PORT        (10890)
-#define DEFAULT_IDEL_TIMEOUT     (60 * 1000)
-
-#define MAX_S5_HDR_LEN          (255 + 6)
-#define MAX_TCP_PAYLOAD_LEN     (2048)
-#define MAX_UDP_PAYLOAD_LEN     (512)
-
-#define S5_IPV4_UDP_SEND_HDR_LEN        10
-#define S5_IPV6_UDP_SEND_HDR_LEN        22
-
-#define MAX_TCP_FRAME_LEN       (MAX_TCP_PAYLOAD_LEN)
-#define MAX_UDP_FRAME_LEN       (MAX_UDP_PAYLOAD_LEN + MAX_S5_HDR_LEN)
-
-enum {
-    STREAM_UP,      /* local -> remote */
-    STREAM_DOWN     /* remote -> local */
-};
-
-typedef struct UVSOCKS5_BUF{
-    char *buf_base;
-    size_t buf_len;
-}UVSOCKS5_BUF;
-
-typedef struct ADDRESS{
-    char host[64];      /* HostName or IpAddress */
-    unsigned short port;
-}ADDRESS;
-
-typedef struct ADDRESS_PAIR{
-    ADDRESS *local;
-    ADDRESS *remote;
-}ADDRESS_PAIR;
 
 typedef struct UVSOCKS5_BASE_CONFIG{
     const char *bind_host;
     unsigned short bind_port;
     unsigned int idel_timeout;
 }UVSOCKS5_BASE_CONFIG;
-
-
 
 typedef struct UVSOCKS5_CALLBACKS{
     /* Event Notify, Can be NULL */
@@ -89,8 +55,8 @@ typedef struct UVSOCKS5_CALLBACKS{
     void (*on_new_dgram)(ADDRESS_PAIR *addr, void **ctx);
     void (*on_dgram_teardown)(void *ctx);
 
-    void (*on_plain_stream)(UVSOCKS5_BUF *buf, int direct, void *ctx);
-    void (*on_plain_dgram)(UVSOCKS5_BUF *buf, int direct, void *ctx);
+    void (*on_plain_stream)(MEM_RANGE *buf, int direct, void *ctx);
+    void (*on_plain_dgram)(MEM_RANGE *buf, int direct, void *ctx);
 
 }UVSOCKS5_CALLBACKS;
 
@@ -99,6 +65,6 @@ typedef struct UVSOCKS5_CTX{
     UVSOCKS5_CALLBACKS callbacks;
 }UVSOCKS5_CTX;
 
-int ssnetio_server_launch(UVSOCKS5_CTX *ctx);
+int uvsocks5_server_launch(UVSOCKS5_CTX *ctx);
 
 #endif //UVSOCKS5_UVSOCKS5_H

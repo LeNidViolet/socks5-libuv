@@ -111,22 +111,25 @@ void on_dgram_teardown(void *ctx) {
     free(ds);
 }
 
-void on_plain_stream(UVSOCKS5_BUF *buf, int direct, void *ctx) {
+void on_plain_stream(MEM_RANGE *buf, int direct, void *ctx) {
     STREAM_SESSION *ss;
     char *desc = direct == STREAM_UP ? "==>" : "<==";
 
     ss = (STREAM_SESSION*)ctx;
 
-    printf("[%d] STREAM %s %.*s\n", ss->index, desc, 10, buf->buf_base);
+    (void)ss;
+    (void)desc;
+    (void)buf;
 }
 
-void on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
+void on_plain_dgram(MEM_RANGE *buf, int direct, void *ctx) {
     DGRAM_SESSION *ds;
     char *desc = direct == STREAM_UP ? "==>" : "<==";
 
     ds = (DGRAM_SESSION*)ctx;
-
-    printf("[%d] DGRAM %s %.*s\n", ds->index, desc, 10, buf->buf_base);
+    (void)ds;
+    (void)desc;
+    (void)buf;
 }
 
 int main(int argc, char **argv) {
@@ -145,7 +148,7 @@ int main(int argc, char **argv) {
     ctx.callbacks.on_plain_stream = on_plain_stream;
     ctx.callbacks.on_plain_dgram = on_plain_dgram;
 
-    ssnetio_server_launch(&ctx);
+    uvsocks5_server_launch(&ctx);
 
     return 0;
 }

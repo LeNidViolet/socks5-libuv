@@ -29,7 +29,7 @@ SET(SOCKS5LIBUV_SRCS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/s5.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/server.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/util.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/base.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/handler.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/list.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/dnsc.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/flow.c

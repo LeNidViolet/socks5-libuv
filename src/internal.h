@@ -61,6 +61,10 @@ typedef enum {
     sock
 }endpoint;
 
+typedef struct UVSOCKS5_BUF{
+    char *buf_base;
+    size_t buf_len;
+}UVSOCKS5_BUF;
 
 typedef struct {
     unsigned char rdstate;
@@ -84,7 +88,7 @@ typedef struct {
         struct sockaddr_in addr4;
         struct sockaddr addr;
 
-        char raw[MAX_TCP_FRAME_LEN];
+        char raw[MAX_S5_TCP_FRAME_LEN];
     } t;
 
     ADDRESS peer;
@@ -133,7 +137,7 @@ typedef struct DGRAM_LOCAL{
 
     uv_udp_send_t req_send;
 
-    char slab[MAX_UDP_FRAME_LEN];
+    char slab[MAX_S5_UDP_FRAME_LEN];
     UVSOCKS5_BUF us_buf;
 }DGRAM_LOCAL;
 
@@ -162,7 +166,7 @@ typedef struct DGRAM_REMOTE{
     uv_udp_send_t req_send;
     uv_getaddrinfo_t req_dns;
 
-    char slab[MAX_UDP_FRAME_LEN]; /* for recv */
+    char slab[MAX_S5_UDP_FRAME_LEN]; /* for recv */
     UVSOCKS5_BUF us_buf;
 
     void *ctx;

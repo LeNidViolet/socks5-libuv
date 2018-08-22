@@ -42,7 +42,7 @@ static void loop_walk_clear(uv_loop_t *loop);
 static void loop_walk_cb(uv_handle_t* handle, void* arg);
 static void loop_walk_close_done(uv_handle_t* handle);
 
-int ssnetio_server_launch(UVSOCKS5_CTX *ctx) {
+int uvsocks5_server_launch(UVSOCKS5_CTX *ctx) {
     int ret = -1;
 
     BREAK_ON_NULL(ctx);
@@ -51,11 +51,11 @@ int ssnetio_server_launch(UVSOCKS5_CTX *ctx) {
 
     memcpy(&uvsocks5_ctx, ctx, sizeof(uvsocks5_ctx));
     if ( !uvsocks5_ctx.config.bind_host )
-        uvsocks5_ctx.config.bind_host = DEFAULT_BIND_HOST;
+        uvsocks5_ctx.config.bind_host = DEFAULT_S5_BIND_HOST;
     if ( !uvsocks5_ctx.config.bind_port )
-        uvsocks5_ctx.config.bind_port = DEFAULT_BIND_PORT;
+        uvsocks5_ctx.config.bind_port = DEFAULT_S5_BIND_PORT;
     if ( !uvsocks5_ctx.config.idel_timeout )
-        uvsocks5_ctx.config.idel_timeout = DEFAULT_IDEL_TIMEOUT;
+        uvsocks5_ctx.config.idel_timeout = DEFAULT_S5_IDEL_TIMEOUT;
 
     ret = server_run(&uvsocks5_ctx);
 

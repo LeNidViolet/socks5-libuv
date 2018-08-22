@@ -124,12 +124,18 @@ BREAK_LABEL:
 }
 
 void handle_plain_stream(CONN *conn) {
+    MEM_RANGE mr;
     int direct = conn == &conn->pn->incoming ? STREAM_UP : STREAM_DOWN;
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_plain_stream);
 
+    mr.buf_base = conn->t.raw;
+    mr.buf_len = sizeof(conn->t.raw);
+    mr.data_base = conn->us_buf.buf_base;
+    mr.data_len = conn->us_buf.buf_len;
+
     uvsocks5_ctx.callbacks.on_plain_stream(
-        &conn->us_buf,
+        &mr,
         direct,
         conn->pn->ctx);
 
@@ -139,10 +145,16 @@ BREAK_LABEL:
 }
 
 void handle_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
+    MEM_RANGE mr;
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_plain_dgram);
 
-    uvsocks5_ctx.callbacks.on_plain_dgram(buf, direct, ctx);
+    mr.buf_base = buf->buf_base;
+    mr.buf_len = buf->buf_len;
+    mr.data_base = buf->buf_base;
+    mr.data_len = buf->buf_len;
+
+    uvsocks5_ctx.callbacks.on_plain_dgram(&mr, direct, ctx);
 
 BREAK_LABEL:
 
