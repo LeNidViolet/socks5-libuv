@@ -251,15 +251,15 @@ int s5_simple_check(const char *data, size_t data_len);
 int s5_addr_copy(s5_ctx *ctx, struct sockaddr *addr, ADDRESS *addr_s);
 
 /* BASE.C */
-void notify_msg_out(int level, const char *format, ...);
-void notify_bind(const char *host, unsigned short port);
-void notify_connection_made(PROXY_NODE *pn);
-void handle_new_stream(CONN *conn);
-void handle_stream_teardown(PROXY_NODE *pn);
-void handle_new_dgram(ADDRESS *local, ADDRESS *remote, void **ctx);
-void handle_dgram_teardown(void *ctx);
-void handle_plain_stream(CONN *conn);
-void handle_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx);
+void uvsocks5_on_msg(int level, const char *format, ...);
+void uvsocks5_on_bind(const char *host, unsigned short port);
+void uvsocks5_on_connection_made(PROXY_NODE *pn);
+void uvsocks5_on_new_stream(CONN *conn);
+void uvsocks5_on_stream_teardown(PROXY_NODE *pn);
+void uvsocks5_on_new_dgram(ADDRESS *local, ADDRESS *remote, void **ctx);
+void uvsocks5_on_dgram_teardown(void *ctx);
+void uvsocks5_on_plain_stream(CONN *conn);
+void uvsocks5_on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx);
 
 /* SERVER.C */
 void conn_write(CONN *conn, const void *data, unsigned int len);

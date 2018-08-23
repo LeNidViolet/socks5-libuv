@@ -26,7 +26,7 @@
 #include "uvsocks5/uvsocks5.h"
 #include "internal.h"
 
-void notify_msg_out(int level, const char *format, ...) {
+void uvsocks5_on_msg(int level, const char *format, ...) {
     va_list ap;
     char msg[1024];
 
@@ -44,7 +44,7 @@ BREAK_LABEL:
     return;
 }
 
-void notify_bind(const char *host, unsigned short port) {
+void uvsocks5_on_bind(const char *host, unsigned short port) {
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_bind);
 
@@ -55,7 +55,7 @@ BREAK_LABEL:
     return;
 }
 
-void notify_connection_made(PROXY_NODE *pn) {
+void uvsocks5_on_connection_made(PROXY_NODE *pn) {
     ADDRESS_PAIR pair;
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_stream_connection_made);
@@ -71,7 +71,7 @@ BREAK_LABEL:
 }
 
 
-void handle_new_stream(CONN *conn) {
+void uvsocks5_on_new_stream(CONN *conn) {
     void *ctx = NULL;
 
     CHECK(0 == str_tcp_endpoint(&conn->handle.tcp, peer, &conn->peer));
@@ -86,7 +86,7 @@ BREAK_LABEL:
     return;
 }
 
-void handle_stream_teardown(PROXY_NODE *pn) {
+void uvsocks5_on_stream_teardown(PROXY_NODE *pn) {
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_stream_teardown);
 
@@ -97,7 +97,7 @@ BREAK_LABEL:
     return;
 }
 
-void handle_new_dgram(ADDRESS *local, ADDRESS *remote, void **ctx) {
+void uvsocks5_on_new_dgram(ADDRESS *local, ADDRESS *remote, void **ctx) {
     ADDRESS_PAIR pair;
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_new_dgram);
@@ -112,7 +112,7 @@ BREAK_LABEL:
     return;
 }
 
-void handle_dgram_teardown(void *ctx) {
+void uvsocks5_on_dgram_teardown(void *ctx) {
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_dgram_teardown);
 
@@ -123,7 +123,7 @@ BREAK_LABEL:
     return;
 }
 
-void handle_plain_stream(CONN *conn) {
+void uvsocks5_on_plain_stream(CONN *conn) {
     MEM_RANGE mr;
     int direct = conn == &conn->pn->incoming ? STREAM_UP : STREAM_DOWN;
 
@@ -144,7 +144,7 @@ BREAK_LABEL:
     return;
 }
 
-void handle_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
+void uvsocks5_on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
     MEM_RANGE mr;
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_plain_dgram);

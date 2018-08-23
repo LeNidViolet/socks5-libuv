@@ -126,7 +126,7 @@ static int do_handshake(PROXY_NODE *pn) {
     incoming = &pn->incoming;
 
     if ( incoming->result < 0 ) {
-        notify_msg_out(1, "[%d] Handshake read error: %s",
+        uvsocks5_on_msg(1, "[%d] Handshake read error: %s",
                        pn->index, uv_strerror((int)incoming->result));
         new_state = do_kill(pn);
         BREAK_NOW;
@@ -146,7 +146,7 @@ static int do_handshake(PROXY_NODE *pn) {
     }
 
     if ( data_len != 0 ) {
-        notify_msg_out(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
+        uvsocks5_on_msg(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
@@ -356,7 +356,7 @@ static int do_req_connect(PROXY_NODE *pn) {
     ASSERT(outgoing->rdstate == c_stop);
     ASSERT(outgoing->wrstate == c_stop);
 
-    notify_connection_made(pn);
+    uvsocks5_on_connection_made(pn);
 
     snprintf(pn->link_info, sizeof(pn->link_info), "%s:%d -> %s:%d",
              incoming->peer.host,
@@ -427,7 +427,7 @@ static int do_proxy(CONN *sender) {
 
     if ( c_done == sender->rdstate && sender->result > 0 ) {
 
-        handle_plain_stream(sender);
+        uvsocks5_on_plain_stream(sender);
     }
 
     if ( conn_cycle("client", incoming, outgoing) ) {
@@ -488,7 +488,7 @@ static int do_almost_dead(PROXY_NODE *pn) {
 }
 
 static int do_clear(PROXY_NODE *pn) {
-    handle_stream_teardown(pn);
+    uvsocks5_on_stream_teardown(pn);
 
     if ( DEBUG_CHECKS ) {
         memset(pn, -1, sizeof(*pn));
@@ -749,7 +749,7 @@ static void dgram_read_done_l(
         /* Emit dgram session */
         cpy_sockaddr(addr, &dgraml->addr.addr);
         str_sockaddr(addr, &local);
-        handle_new_dgram(&local, &remote, &dgramr->ctx);
+        uvsocks5_on_new_dgram(&local, &remote, &dgramr->ctx);
 
         snprintf(dgramr->link_info, sizeof(dgramr->link_info),
             "%s:%d -> %s:%d",
@@ -758,7 +758,7 @@ static void dgram_read_done_l(
     } else {
         /* Assume that will no DGRAM from different address */
         if ( 0 != equal_sockaddr(addr, &dgraml->addr.addr) ) {
-            notify_msg_out(1, "[%d] Dgram from different local address", dgraml->dn->pn->index);
+            uvsocks5_on_msg(1, "[%d] Dgram from different local address", dgraml->dn->pn->index);
             BREAK_NOW;
         }
     }
@@ -768,7 +768,7 @@ static void dgram_read_done_l(
     /* Update address range */
     dgraml->us_buf.buf_base = (char*)data_pos;
     dgraml->us_buf.buf_len = data_len;
-    handle_plain_dgram(&dgraml->us_buf, STREAM_UP, dgramr->ctx);
+    uvsocks5_on_plain_dgram(&dgraml->us_buf, STREAM_UP, dgramr->ctx);
 
     if ( 0 == dgramr->addr.addr.sa_family ) {
         if ( parser.atyp == s5_atyp_host ) {
@@ -847,12 +847,12 @@ static void dgram_read_done_r(
 
     dgramr->us_buf.buf_base = buf->base;
     dgramr->us_buf.buf_len = (size_t)nread;
-    handle_plain_dgram(&dgramr->us_buf, STREAM_DOWN, dgramr->ctx);
+    uvsocks5_on_plain_dgram(&dgramr->us_buf, STREAM_DOWN, dgramr->ctx);
 
     /* shift to socks5 hdr */
     hdr_len = addr->sa_family == AF_INET ? S5_IPV4_UDP_SEND_HDR_LEN : S5_IPV6_UDP_SEND_HDR_LEN;
     if ( hdr_len + nread > sizeof(dgramr->slab) ) {
-        notify_msg_out(1, "Dgram ignore too huge frame, size: %d", nread);
+        uvsocks5_on_msg(1, "Dgram ignore too huge frame, size: %d", nread);
         BREAK_NOW;
     }
     memmove(buf->base + hdr_len, buf->base, nread);
@@ -1024,7 +1024,7 @@ static void dgram_close_done(uv_handle_t* handle) {
 
     dn->state++;
     if ( u_dead == dn->state ) {
-        handle_dgram_teardown(dn->outgoing.ctx);
+        uvsocks5_on_dgram_teardown(dn->outgoing.ctx);
 
         if ( DEBUG_CHECKS )
             memset(dn, 0xff, sizeof(*dn));

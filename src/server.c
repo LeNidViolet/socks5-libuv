@@ -87,7 +87,7 @@ static int server_run(UVSOCKS5_CTX *ctx) {
                          NULL,
                          &hints);
     if ( 0 != ret ) {
-        notify_msg_out(1, "uv_getaddrinfo failed: %s", uv_strerror(ret));
+        uvsocks5_on_msg(1, "uv_getaddrinfo failed: %s", uv_strerror(ret));
         BREAK_NOW;
     }
 
@@ -120,7 +120,7 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
     loop = uv_req_get_data((uv_req_t *)req);
 
     if ( status < 0 ) {
-        notify_msg_out(1, "uv_getaddrinfo failed: %s", uv_strerror(status));
+        uvsocks5_on_msg(1, "uv_getaddrinfo failed: %s", uv_strerror(status));
         BREAK_NOW;
     }
 
@@ -164,7 +164,7 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
 
         ret = uv_tcp_bind(tcp_handle, &s.addr, 0);
         if ( 0 != ret ) {
-            notify_msg_out(
+            uvsocks5_on_msg(
                 1,
                 "Tcp bind to %s:%d failed: %s",
                 addrbuf,
@@ -175,7 +175,7 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
 
         ret = uv_listen((uv_stream_t *)tcp_handle, SOMAXCONN, on_connection);
         if ( 0 != ret ) {
-            notify_msg_out(
+            uvsocks5_on_msg(
                 1,
                 "Tcp listen to %s:%d failed: %s",
                 addrbuf,
@@ -184,7 +184,7 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
             BREAK_NOW;
         }
 
-        notify_bind(addrbuf, port);
+        uvsocks5_on_bind(addrbuf, port);
     }
 
 BREAK_LABEL:
@@ -240,7 +240,7 @@ static void on_connection(uv_stream_t *server, int status) {
     CHECK(0 == uv_timer_init(loop, &outgoing->timer_handle));
 
     /* Emit a notify */
-    handle_new_stream(incoming);
+    uvsocks5_on_new_stream(incoming);
     incoming->us_buf.buf_base = incoming->t.raw;
     incoming->us_buf.buf_len = sizeof(incoming->t.raw);
     outgoing->us_buf.buf_base = outgoing->t.raw;
@@ -434,7 +434,7 @@ void conn_timer_reset(CONN *conn) {
 int conn_cycle(const char *who, CONN *a, CONN *b) {
     if ( a->result < 0 ) {
         if ( a->result != UV_EOF ) {
-            notify_msg_out(
+            uvsocks5_on_msg(
                 1,
                 "[%d] %s error: %s [%s]",
                 a->pn->index,
