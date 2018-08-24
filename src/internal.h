@@ -260,6 +260,9 @@ void uvsocks5_on_new_dgram(ADDRESS *local, ADDRESS *remote, void **ctx);
 void uvsocks5_on_dgram_teardown(void *ctx);
 void uvsocks5_on_plain_stream(CONN *conn);
 void uvsocks5_on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx);
+int uvsocks5_write_stream_out(
+    MEM_RANGE *buf, int direct, void *stream_id,
+    write_stream_out_callback callback);
 
 /* SERVER.C */
 void conn_write(CONN *conn, const void *data, unsigned int len);

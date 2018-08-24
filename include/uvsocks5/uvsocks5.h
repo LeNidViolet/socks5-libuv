@@ -46,7 +46,7 @@ typedef struct UVSOCKS5_CALLBACKS{
     /* A new request coming,
      * set data to a context associate with this session,
      * */
-    void (*on_new_stream)(ADDRESS *addr, void **ctx);
+    void (*on_new_stream)(ADDRESS *addr, void **ctx, void *stream_id);
     void (*on_stream_teardown)(void *ctx);
 
     /* A new udp dgram request
@@ -65,6 +65,15 @@ typedef struct UVSOCKS5_CTX{
     UVSOCKS5_CALLBACKS callbacks;
 }UVSOCKS5_CTX;
 
-int uvsocks5_server_launch(UVSOCKS5_CTX *ctx);
 
+typedef void (*write_stream_out_callback)(int status, void *ctx);
+typedef struct UVSOCKS5_PORT{
+    /* Interface for send data out */
+    int (*write_stream_out)(
+        MEM_RANGE *buf, int direct, void *stream_id,
+        write_stream_out_callback callback);
+}UVSOCKS5_PORT;
+
+int uvsocks5_server_launch(UVSOCKS5_CTX *ctx);
+void uvsocks5_server_port(UVSOCKS5_PORT *port);
 #endif //UVSOCKS5_UVSOCKS5_H

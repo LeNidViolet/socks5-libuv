@@ -57,11 +57,12 @@ void on_stream_connection_made(ADDRESS_PAIR *addr, void *ctx) {
         addr->remote->host, addr->remote->port);
 }
 
-void on_new_stream(ADDRESS *addr, void **ctx) {
+void on_new_stream(ADDRESS *addr, void **ctx, void *stream_id) {
     static unsigned int index = 0;
     STREAM_SESSION *ss;
 
     (void)addr;
+    (void)stream_id;
 
     ss = malloc(sizeof(*ss));
     memset(ss, 0, sizeof(*ss));

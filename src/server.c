@@ -42,6 +42,10 @@ static void loop_walk_clear(uv_loop_t *loop);
 static void loop_walk_cb(uv_handle_t* handle, void* arg);
 static void loop_walk_close_done(uv_handle_t* handle);
 
+void uvsocks5_server_port(UVSOCKS5_PORT *port) {
+    port->write_stream_out = uvsocks5_write_stream_out;
+}
+
 int uvsocks5_server_launch(UVSOCKS5_CTX *ctx) {
     int ret = -1;
 

@@ -228,20 +228,20 @@ static int do_req_parse(PROXY_NODE *pn) {
     }
 
     if ( 0 != data_len ) {
-        notify_msg_out(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
+        uvsocks5_on_msg(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
     if ( s5_exec_cmd != err ) {
-        notify_msg_out(1, "[%d] Request error: %s", pn->index, s5_strerror((s5_err)err));
+        uvsocks5_on_msg(1, "[%d] Request error: %s", pn->index, s5_strerror((s5_err)err));
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
     if ( s5_cmd_tcp_bind == parser->cmd ) {
         /* Not supported */
-        notify_msg_out(1, "[%d] Bind requests are not supported.", pn->index);
+        uvsocks5_on_msg(1, "[%d] Bind requests are not supported.", pn->index);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
@@ -252,7 +252,7 @@ static int do_req_parse(PROXY_NODE *pn) {
     }
 
     if ( s5_cmd_tcp_connect != parser->cmd ) {
-        notify_msg_out(1, "[%d] Unknow s5 command %d.", pn->index, parser->cmd);
+        uvsocks5_on_msg(1, "[%d] Unknow s5 command %d.", pn->index, parser->cmd);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
@@ -281,7 +281,7 @@ static int do_req_lookup(PROXY_NODE *pn) {
     outgoing = &pn->outgoing;
 
     if ( outgoing->result < 0 ) {
-        notify_msg_out(1, "[%d] Lookup Error For %s : %s",
+        uvsocks5_on_msg(1, "[%d] Lookup Error For %s : %s",
                        pn->index,
                        outgoing->peer.host,
                        uv_strerror((int)outgoing->result));
@@ -316,7 +316,7 @@ static int do_req_connect_start(PROXY_NODE *pn) {
 
     err = conn_connect(outgoing);
     if ( err != 0 ) {
-        notify_msg_out(1, "[%d] Connect error: %s", pn->index, uv_strerror(err));
+        uvsocks5_on_msg(1, "[%d] Connect error: %s", pn->index, uv_strerror(err));
         new_state = do_kill(pn);
     } else {
         new_state = s_req_connect;
@@ -340,7 +340,7 @@ static int do_req_connect(PROXY_NODE *pn) {
     outgoing = &pn->outgoing;
 
     if ( outgoing->result != 0 ) {
-        notify_msg_out(
+        uvsocks5_on_msg(
             1,
             "[%d] Connect %s:%d error: %s",
             pn->index,
@@ -452,7 +452,7 @@ int do_kill(PROXY_NODE *pn) {
 
     if ( pn->outstanding != 0 ) {
         /* Wait for uncomplete operations */
-        notify_msg_out(
+        uvsocks5_on_msg(
             2,
             "[%d] Waitting outstanding operation: %d [%s]",
             pn->index, pn->outstanding, pn->link_info);
@@ -707,7 +707,7 @@ static void dgram_read_done_l(
     }
 
     if ( nread < 0 ) {
-        notify_msg_out(1, "Dgram read failed(local): %s", uv_strerror((int)nread));
+        uvsocks5_on_msg(1, "Dgram read failed(local): %s", uv_strerror((int)nread));
         BREAK_NOW;
     }
 
@@ -721,13 +721,13 @@ static void dgram_read_done_l(
     /* parse s5 packet */
     err = s5_parse_udp(&parser, &data_pos, &data_len);
     if ( s5_exec_cmd != err ) {
-        notify_msg_out(1, "[%d] S5 dgram parse error: %s",
+        uvsocks5_on_msg(1, "[%d] S5 dgram parse error: %s",
                        dgraml->dn->pn->index, s5_strerror(err));
         BREAK_NOW;
     }
 
     if ( 0 == data_len ) {
-        notify_msg_out(1, "[%d] No dgram payload after parse",
+        uvsocks5_on_msg(1, "[%d] No dgram payload after parse",
                        dgraml->dn->pn->index, s5_strerror(err));
         BREAK_NOW;
     }
@@ -738,7 +738,7 @@ static void dgram_read_done_l(
     /* TODO: Dgram client maybe send data to different addresses by the same socket */
     if ( dgramr->peer.port ) {
         if ( dgramr->peer.port != remote.port || 0 != strcmp(dgramr->peer.host, remote.host) ) {
-            notify_msg_out(1, "[%d] Dgram one to more detected", dgraml->dn->pn->index);
+            uvsocks5_on_msg(1, "[%d] Dgram one to more detected", dgraml->dn->pn->index);
             BREAK_NOW;
         }
     } else {
@@ -825,7 +825,7 @@ static void dgram_read_done_r(
     }
 
     if ( nread < 0 ) {
-        notify_msg_out(1, "Dgram read failed(remote): %s", uv_strerror((int)nread));
+        uvsocks5_on_msg(1, "Dgram read failed(remote): %s", uv_strerror((int)nread));
         BREAK_NOW;
     }
 
@@ -904,7 +904,7 @@ static void dgram_getaddrinfo_done(
         dnsc_add(dgramr->peer.host, addrs->ai_addr);
         dgram_write_to_remote(dgraml);
     } else {
-        notify_msg_out(
+        uvsocks5_on_msg(
             1,
             "Dgram getaddrinfo failed: %s, domain: %s",
             uv_strerror(status),

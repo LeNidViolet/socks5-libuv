@@ -26,6 +26,8 @@
 #include "uvsocks5/uvsocks5.h"
 #include "internal.h"
 
+static void uvsocks5_write_stream_out_done(uv_write_t *req, int status);
+
 void uvsocks5_on_msg(int level, const char *format, ...) {
     va_list ap;
     char msg[1024];
@@ -78,7 +80,7 @@ void uvsocks5_on_new_stream(CONN *conn) {
 
     BREAK_ON_NULL(uvsocks5_ctx.callbacks.on_new_stream);
 
-    uvsocks5_ctx.callbacks.on_new_stream(&conn->peer, &ctx);
+    uvsocks5_ctx.callbacks.on_new_stream(&conn->peer, &ctx, conn->pn);
     conn->pn->ctx = ctx;
 
 BREAK_LABEL:
@@ -159,4 +161,55 @@ void uvsocks5_on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
 BREAK_LABEL:
 
     return ;
+}
+
+int uvsocks5_write_stream_out(
+    MEM_RANGE *buf, int direct, void *stream_id,
+    write_stream_out_callback callback) {
+    int ret = -1;
+    PROXY_NODE *pn;
+    CONN *conn;
+    uv_buf_t buf_t;
+
+    BREAK_ON_NULL(buf);
+    BREAK_ON_FALSE(STREAM_UP == direct || STREAM_DOWN == direct);
+    BREAK_ON_NULL(stream_id);
+
+    pn = (PROXY_NODE*)stream_id;
+    conn = STREAM_UP == direct ? &pn->outgoing : &pn->incoming;
+
+    ASSERT(conn->wrstate == c_stop || conn->wrstate == c_done);
+    conn->wrstate = c_busy;
+
+    buf_t = uv_buf_init(buf->data_base, (unsigned int)buf->data_len);
+
+    uv_req_set_data((uv_req_t*)&conn->write_req, callback);
+    if ( 0 != uv_write(&conn->write_req,
+                       &conn->handle.stream,
+                       &buf_t,
+                       1,
+                       uvsocks5_write_stream_out_done) ) {
+        do_kill(conn->pn);
+        BREAK_NOW;
+    }
+    conn->pn->outstanding++;
+    conn_timer_reset(conn);
+
+BREAK_LABEL:
+
+    return ret;
+}
+
+static void uvsocks5_write_stream_out_done(uv_write_t *req, int status) {
+    CONN *conn;
+    write_stream_out_callback callback;
+
+    conn = CONTAINER_OF(req, CONN, write_req);
+    conn->pn->outstanding--;
+    ASSERT(conn->wrstate == c_busy);
+    conn->wrstate = c_stop;
+
+    callback = uv_req_get_data((uv_req_t*)req);
+    if ( callback )
+        callback(status, conn->pn->ctx);
 }
