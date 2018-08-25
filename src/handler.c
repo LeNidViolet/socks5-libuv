@@ -209,7 +209,24 @@ static void uvsocks5_write_stream_out_done(uv_write_t *req, int status) {
     ASSERT(conn->wrstate == c_busy);
     conn->wrstate = c_stop;
 
-    callback = uv_req_get_data((uv_req_t*)req);
-    if ( callback )
-        callback(status, conn->pn->ctx);
+    if ( 0 != status ) {
+        do_kill(conn->pn);
+    } else {
+        callback = uv_req_get_data((uv_req_t*)req);
+        if ( callback )
+            callback(status, conn->pn->ctx);
+    }
+}
+
+void uvsocks5_shutdown_link(void *stream_id) {
+    PROXY_NODE *pn;
+
+    BREAK_ON_NULL(stream_id);
+
+    pn = (PROXY_NODE*)stream_id;
+    do_kill(pn);
+
+BREAK_LABEL:
+
+    return ;
 }

@@ -72,6 +72,9 @@ typedef struct UVSOCKS5_PORT{
     int (*write_stream_out)(
         MEM_RANGE *buf, int direct, void *stream_id,
         write_stream_out_callback callback);
+
+    /* Interface for shutdown link */
+    void (*shutdown_link)(void *stream_id);
 }UVSOCKS5_PORT;
 
 int uvsocks5_server_launch(UVSOCKS5_CTX *ctx);

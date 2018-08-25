@@ -263,6 +263,7 @@ void uvsocks5_on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx);
 int uvsocks5_write_stream_out(
     MEM_RANGE *buf, int direct, void *stream_id,
     write_stream_out_callback callback);
+void uvsocks5_shutdown_link(void *stream_id);
 
 /* SERVER.C */
 void conn_write(CONN *conn, const void *data, unsigned int len);
