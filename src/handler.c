@@ -203,18 +203,21 @@ BREAK_LABEL:
 static void uvsocks5_write_stream_out_done(uv_write_t *req, int status) {
     CONN *conn;
     write_stream_out_callback callback;
+    int direct;
 
     conn = CONTAINER_OF(req, CONN, write_req);
     conn->pn->outstanding--;
     ASSERT(conn->wrstate == c_busy);
     conn->wrstate = c_stop;
 
+    direct = conn == &conn->pn->incoming ? STREAM_UP : STREAM_DOWN;
+
     if ( 0 != status ) {
         do_kill(conn->pn);
     } else {
         callback = uv_req_get_data((uv_req_t*)req);
         if ( callback )
-            callback(status, conn->pn->ctx);
+            callback(direct, status, conn->pn->ctx);
     }
 }
 

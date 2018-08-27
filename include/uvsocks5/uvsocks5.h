@@ -66,7 +66,7 @@ typedef struct UVSOCKS5_CTX{
 }UVSOCKS5_CTX;
 
 
-typedef void (*write_stream_out_callback)(int status, void *ctx);
+typedef void (*write_stream_out_callback)(int direct, int status, void *ctx);
 typedef struct UVSOCKS5_PORT{
     /* Interface for send data out */
     int (*write_stream_out)(
