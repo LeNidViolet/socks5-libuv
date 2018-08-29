@@ -418,7 +418,7 @@ BREAK_LABEL:
 
 /* Proxy incoming data back and forth. */
 static int do_proxy(CONN *sender) {
-    int new_state;
+    int new_state = s_proxy;
     CONN *incoming;
     CONN *outgoing;
 
@@ -439,8 +439,6 @@ static int do_proxy(CONN *sender) {
         new_state = do_kill(incoming->pn);
         BREAK_NOW;
     }
-
-    new_state = s_proxy;
 
 BREAK_LABEL:
 

@@ -55,7 +55,7 @@ typedef struct UVSOCKS5_CALLBACKS{
     void (*on_new_dgram)(ADDRESS_PAIR *addr, void **ctx);
     void (*on_dgram_teardown)(void *ctx);
 
-    void (*on_plain_stream)(MEM_RANGE *buf, int direct, void *ctx);
+    int (*on_plain_stream)(MEM_RANGE *buf, int direct, void *ctx);
     void (*on_plain_dgram)(MEM_RANGE *buf, int direct, void *ctx);
 
 }UVSOCKS5_CALLBACKS;
@@ -75,6 +75,8 @@ typedef struct UVSOCKS5_PORT{
 
     /* Interface for shutdown link */
     void (*shutdown_link)(void *stream_id);
+
+    void (*stream_pause)(void *stream_id, int direct, int pause);
 }UVSOCKS5_PORT;
 
 int uvsocks5_server_launch(UVSOCKS5_CTX *ctx);

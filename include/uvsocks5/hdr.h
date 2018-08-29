@@ -47,6 +47,11 @@ enum {
     STREAM_DOWN     /* remote -> local */
 };
 
+enum {
+    PASS,
+    REJECT
+};
+
 typedef struct ADDRESS{
     char host[64];      /* HostName or IpAddress */
     unsigned short port;

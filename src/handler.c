@@ -125,7 +125,8 @@ BREAK_LABEL:
     return;
 }
 
-void uvsocks5_on_plain_stream(CONN *conn) {
+int uvsocks5_on_plain_stream(CONN *conn) {
+    int ret = PASS;
     MEM_RANGE mr;
     int direct = conn == &conn->pn->incoming ? STREAM_UP : STREAM_DOWN;
 
@@ -136,14 +137,14 @@ void uvsocks5_on_plain_stream(CONN *conn) {
     mr.data_base = conn->us_buf.buf_base;
     mr.data_len = conn->us_buf.buf_len;
 
-    uvsocks5_ctx.callbacks.on_plain_stream(
+    ret = uvsocks5_ctx.callbacks.on_plain_stream(
         &mr,
         direct,
         conn->pn->ctx);
 
 BREAK_LABEL:
 
-    return;
+    return ret;
 }
 
 void uvsocks5_on_plain_dgram(UVSOCKS5_BUF *buf, int direct, void *ctx) {
@@ -232,4 +233,31 @@ void uvsocks5_shutdown_link(void *stream_id) {
 BREAK_LABEL:
 
     return ;
+}
+
+void uvsocks5_stream_pause(void *stream_id, int direct, int pause) {
+    PROXY_NODE *pn;
+    CONN *conn;
+
+    BREAK_ON_NULL(stream_id);
+    BREAK_ON_FALSE(STREAM_UP == direct || STREAM_DOWN == direct);
+
+    pn = (PROXY_NODE*)stream_id;
+    conn = STREAM_UP == direct ? &pn->outgoing : &pn->incoming;
+    if ( pause ) {
+        if ( c_busy == conn->rdstate )
+            uv_read_stop(&conn->handle.stream);
+        if ( c_stop != conn->rdstate )
+            conn->rdstate = c_stop;
+    } else {
+        if ( c_busy != conn->rdstate ) {
+            if ( c_stop != conn->rdstate )
+                conn->rdstate = c_stop;
+            conn_read(conn);
+        }
+    }
+
+BREAK_LABEL:
+
+    return;
 }
