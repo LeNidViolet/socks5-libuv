@@ -66,17 +66,15 @@ typedef struct UVSOCKS5_CTX{
 }UVSOCKS5_CTX;
 
 
-typedef void (*write_stream_out_callback)(int direct, int status, void *ctx);
+typedef void (*write_stream_out_callback)(void* param, int direct, int status, void *ctx);
 typedef struct UVSOCKS5_PORT{
     /* Interface for send data out */
     int (*write_stream_out)(
         MEM_RANGE *buf, int direct, void *stream_id,
-        write_stream_out_callback callback);
+        write_stream_out_callback callback, void *param);
 
     /* Interface for shutdown link */
     void (*shutdown_link)(void *stream_id);
-
-    void (*stream_pause)(void *stream_id, int direct, int pause);
 }UVSOCKS5_PORT;
 
 int uvsocks5_server_launch(UVSOCKS5_CTX *ctx);

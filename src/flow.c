@@ -418,7 +418,7 @@ BREAK_LABEL:
 
 /* Proxy incoming data back and forth. */
 static int do_proxy(CONN *sender) {
-    int new_state = s_proxy;
+    int new_state = s_proxy, action;
     CONN *incoming;
     CONN *outgoing;
 
@@ -426,8 +426,20 @@ static int do_proxy(CONN *sender) {
     outgoing = &sender->pn->outgoing;
 
     if ( c_done == sender->rdstate && sender->result > 0 ) {
+        action = uvsocks5_on_plain_stream(sender);
+        switch (action) {
+        case PASS:
+            break;
 
-        uvsocks5_on_plain_stream(sender);
+        case NEEDMORE:
+        case REJECT:
+            /* 继续READ */
+            sender->rdstate = c_stop;
+            /* TODO: 另一侧要不要暂停读取? */
+            break;
+        default:
+            UNREACHABLE();
+        }
     }
 
     if ( conn_cycle("client", incoming, outgoing) ) {

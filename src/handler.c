@@ -28,6 +28,11 @@
 
 static void uvsocks5_write_stream_out_done(uv_write_t *req, int status);
 
+typedef struct {
+    write_stream_out_callback callback;
+    void *param;
+}SND_CTX;
+
 void uvsocks5_on_msg(int level, const char *format, ...) {
     va_list ap;
     char msg[1024];
@@ -135,7 +140,7 @@ int uvsocks5_on_plain_stream(CONN *conn) {
     mr.buf_base = conn->t.raw;
     mr.buf_len = sizeof(conn->t.raw);
     mr.data_base = conn->us_buf.buf_base;
-    mr.data_len = conn->us_buf.buf_len;
+    mr.data_len = (size_t)conn->result;
 
     ret = uvsocks5_ctx.callbacks.on_plain_stream(
         &mr,
@@ -166,11 +171,12 @@ BREAK_LABEL:
 
 int uvsocks5_write_stream_out(
     MEM_RANGE *buf, int direct, void *stream_id,
-    write_stream_out_callback callback) {
+    write_stream_out_callback callback, void *param) {
     int ret = -1;
     PROXY_NODE *pn;
     CONN *conn;
     uv_buf_t buf_t;
+    SND_CTX *snd_ctx;
 
     BREAK_ON_NULL(buf);
     BREAK_ON_FALSE(STREAM_UP == direct || STREAM_DOWN == direct);
@@ -184,12 +190,17 @@ int uvsocks5_write_stream_out(
 
     buf_t = uv_buf_init(buf->data_base, (unsigned int)buf->data_len);
 
-    uv_req_set_data((uv_req_t*)&conn->write_req, callback);
+    snd_ctx = malloc(sizeof(*snd_ctx));
+    CHECK(snd_ctx);
+    snd_ctx->callback = callback;
+    snd_ctx->param = param;
+    uv_req_set_data((uv_req_t*)&conn->write_req, snd_ctx);
     if ( 0 != uv_write(&conn->write_req,
                        &conn->handle.stream,
                        &buf_t,
                        1,
                        uvsocks5_write_stream_out_done) ) {
+        free(snd_ctx);
         do_kill(conn->pn);
         BREAK_NOW;
     }
@@ -203,7 +214,7 @@ BREAK_LABEL:
 
 static void uvsocks5_write_stream_out_done(uv_write_t *req, int status) {
     CONN *conn;
-    write_stream_out_callback callback;
+    SND_CTX *snd_ctx;
     int direct;
 
     conn = CONTAINER_OF(req, CONN, write_req);
@@ -211,15 +222,13 @@ static void uvsocks5_write_stream_out_done(uv_write_t *req, int status) {
     ASSERT(conn->wrstate == c_busy);
     conn->wrstate = c_stop;
 
-    direct = conn == &conn->pn->incoming ? STREAM_UP : STREAM_DOWN;
+    direct = conn == &conn->pn->incoming ? STREAM_DOWN : STREAM_UP;
 
-    if ( 0 != status ) {
-        do_kill(conn->pn);
-    } else {
-        callback = uv_req_get_data((uv_req_t*)req);
-        if ( callback )
-            callback(direct, status, conn->pn->ctx);
-    }
+    snd_ctx = uv_req_get_data((uv_req_t*)req);
+    if ( snd_ctx->callback )
+        snd_ctx->callback(snd_ctx->param, direct, status, conn->pn->ctx);
+
+    free(snd_ctx);
 }
 
 void uvsocks5_shutdown_link(void *stream_id) {

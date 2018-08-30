@@ -45,7 +45,6 @@ static void loop_walk_close_done(uv_handle_t* handle);
 void uvsocks5_server_port(UVSOCKS5_PORT *port) {
     port->write_stream_out = uvsocks5_write_stream_out;
     port->shutdown_link = uvsocks5_shutdown_link;
-    port->stream_pause = uvsocks5_stream_pause;
 }
 
 int uvsocks5_server_launch(UVSOCKS5_CTX *ctx) {

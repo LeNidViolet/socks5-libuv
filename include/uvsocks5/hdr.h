@@ -49,6 +49,7 @@ enum {
 
 enum {
     PASS,
+    NEEDMORE,
     REJECT
 };
 
