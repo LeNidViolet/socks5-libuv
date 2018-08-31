@@ -75,6 +75,7 @@ typedef struct UVSOCKS5_PORT{
 
     /* Interface for shutdown link */
     void (*shutdown_link)(void *stream_id);
+    void (*stream_pause)(void *stream_id, int direct, int pause);
 }UVSOCKS5_PORT;
 
 int uvsocks5_server_launch(UVSOCKS5_CTX *ctx);

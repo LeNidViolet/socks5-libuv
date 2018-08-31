@@ -250,7 +250,7 @@ int str_udp_endpoint(const uv_udp_t *udp_handle, ADDRESS *addr_s);
 int s5_simple_check(const char *data, size_t data_len);
 int s5_addr_copy(s5_ctx *ctx, struct sockaddr *addr, ADDRESS *addr_s);
 
-/* BASE.C */
+/* HANDLER.C */
 void uvsocks5_on_msg(int level, const char *format, ...);
 void uvsocks5_on_bind(const char *host, unsigned short port);
 void uvsocks5_on_connection_made(PROXY_NODE *pn);
@@ -264,13 +264,14 @@ int uvsocks5_write_stream_out(
     MEM_RANGE *buf, int direct, void *stream_id,
     write_stream_out_callback callback, void *param);
 void uvsocks5_shutdown_link(void *stream_id);
+void uvsocks5_stream_pause(void *stream_id, int direct, int pause);
 
 /* SERVER.C */
 void conn_write(CONN *conn, const void *data, unsigned int len);
 void conn_read(CONN *conn);
 void conn_timer_reset(CONN *conn);
 int conn_connect(CONN *conn);
-int conn_cycle(const char *who, CONN *a, CONN *b);
+int conn_cycle(const char *who, CONN *recver, CONN *sender);
 void conn_connect_done(uv_connect_t *req, int status);
 void conn_getaddrinfo(CONN *conn, const char *hostname);
 void conn_close(CONN *conn);

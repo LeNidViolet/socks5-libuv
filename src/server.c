@@ -45,6 +45,7 @@ static void loop_walk_close_done(uv_handle_t* handle);
 void uvsocks5_server_port(UVSOCKS5_PORT *port) {
     port->write_stream_out = uvsocks5_write_stream_out;
     port->shutdown_link = uvsocks5_shutdown_link;
+    port->stream_pause = uvsocks5_stream_pause;
 }
 
 int uvsocks5_server_launch(UVSOCKS5_CTX *ctx) {
@@ -436,40 +437,40 @@ void conn_timer_reset(CONN *conn) {
                               0));
 }
 
-int conn_cycle(const char *who, CONN *a, CONN *b) {
-    if ( a->result < 0 ) {
-        if ( a->result != UV_EOF ) {
+int conn_cycle(const char *who, CONN *recver, CONN *sender) {
+    if ( recver->result < 0 ) {
+        if ( recver->result != UV_EOF ) {
             uvsocks5_on_msg(
                 1,
                 "[%d] %s error: %s [%s]",
-                a->pn->index,
+                recver->pn->index,
                 who,
-                uv_strerror((int)a->result),
-                a->pn->link_info);
+                uv_strerror((int)recver->result),
+                recver->pn->link_info);
         }
 
         return -1;
     }
 
-    if ( b->result < 0 ) {
+    if ( sender->result < 0 ) {
         return -1;
     }
 
-    if ( a->wrstate == c_done ) {
-        a->wrstate = c_stop;
+    if ( recver->wrstate == c_done ) {
+        recver->wrstate = c_stop;
     }
 
     /* The logic is as follows: read when we don't write and write when we don't
      * read.  That gives us back-pressure handling for free because if the peer
      * sends data faster than we consume it, TCP congestion control kicks in.
      */
-    if ( a->wrstate == c_stop ) {
-        if ( b->rdstate == c_stop ) {
-            conn_read(b);
+    if ( recver->wrstate == c_stop ) {
+        if ( sender->rdstate == c_stop ) {
+            conn_read(sender);
         }
-        else if ( b->rdstate == c_done ) {
-            conn_write(a, b->us_buf.buf_base, (unsigned int)b->result);
-            b->rdstate = c_stop;  /* Triggers the call to conn_read() above. */
+        else if ( sender->rdstate == c_done ) {
+            conn_write(recver, sender->us_buf.buf_base, (unsigned int)sender->result);
+            sender->rdstate = c_stop;  /* Triggers the call to conn_read() above. */
         }
     }
 

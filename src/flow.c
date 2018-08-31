@@ -433,10 +433,7 @@ static int do_proxy(CONN *sender) {
 
         case NEEDMORE:
         case REJECT:
-            /* 继续READ */
-            sender->rdstate = c_stop;
-            /* TODO: 另一侧要不要暂停读取? */
-            break;
+            BREAK_NOW;
         default:
             UNREACHABLE();
         }
