@@ -237,36 +237,11 @@ void uvsocks5_shutdown_link(void *stream_id) {
     BREAK_ON_NULL(stream_id);
 
     pn = (PROXY_NODE*)stream_id;
+
+    uvsocks5_on_msg(1, "%d Interface Shutdown [%s]", pn->index, pn->link_info);
     do_kill(pn);
 
 BREAK_LABEL:
 
     return ;
-}
-
-void uvsocks5_stream_pause(void *stream_id, int direct, int pause) {
-    PROXY_NODE *pn;
-    CONN *conn;
-
-    BREAK_ON_NULL(stream_id);
-    BREAK_ON_FALSE(STREAM_UP == direct || STREAM_DOWN == direct);
-
-    pn = (PROXY_NODE*)stream_id;
-    conn = STREAM_UP == direct ? &pn->outgoing : &pn->incoming;
-    if ( pause ) {
-        if ( c_busy == conn->rdstate )
-            uv_read_stop(&conn->handle.stream);
-        if ( c_stop != conn->rdstate )
-            conn->rdstate = c_stop;
-    } else {
-        if ( c_busy != conn->rdstate ) {
-            if ( c_stop != conn->rdstate )
-                conn->rdstate = c_stop;
-            conn_read(conn);
-        }
-    }
-
-BREAK_LABEL:
-
-    return;
 }
