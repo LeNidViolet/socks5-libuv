@@ -233,20 +233,6 @@ static void uvsocks5_write_stream_out_done(uv_write_t *req, int status) {
     free(snd_ctx);
 }
 
-void uvsocks5_shutdown_link(void *stream_id) {
-    PROXY_NODE *pn;
-
-    BREAK_ON_NULL(stream_id);
-
-    pn = (PROXY_NODE*)stream_id;
-
-    do_kill(pn);
-
-BREAK_LABEL:
-
-    return ;
-}
-
 void uvsocks5_stream_pause(void *stream_id, int direct, int pause) {
     PROXY_NODE *pn;
     CONN *conn;
