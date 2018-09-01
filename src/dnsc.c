@@ -77,8 +77,6 @@ DNSC *dnsc_add(char *host, struct sockaddr *addr) {
             cpy_sockaddr(addr, &ret->t.addr);
         }
 
-        printf("DNSC ADD %s\n", ret->host);
-
         InsertTailList(&dnsc_list, &ret->list);
 
         dnsc_outstanding++;

@@ -442,7 +442,7 @@ int conn_cycle(const char *who, CONN *recver, CONN *sender) {
         if ( recver->result != UV_EOF ) {
             uvsocks5_on_msg(
                 1,
-                "[%d] %s error: %s [%s]",
+                "%4d %s error: %s [%s]",
                 recver->pn->index,
                 who,
                 uv_strerror((int)recver->result),

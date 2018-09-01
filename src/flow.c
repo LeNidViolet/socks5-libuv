@@ -126,7 +126,7 @@ static int do_handshake(PROXY_NODE *pn) {
     incoming = &pn->incoming;
 
     if ( incoming->result < 0 ) {
-        uvsocks5_on_msg(1, "[%d] Handshake read error: %s",
+        uvsocks5_on_msg(1, "%4d Handshake read error: %s",
                        pn->index, uv_strerror((int)incoming->result));
         new_state = do_kill(pn);
         BREAK_NOW;
@@ -146,7 +146,7 @@ static int do_handshake(PROXY_NODE *pn) {
     }
 
     if ( data_len != 0 ) {
-        uvsocks5_on_msg(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
+        uvsocks5_on_msg(1, "%4d Junk in equest %u", pn->index, (unsigned)data_len);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
@@ -228,20 +228,20 @@ static int do_req_parse(PROXY_NODE *pn) {
     }
 
     if ( 0 != data_len ) {
-        uvsocks5_on_msg(1, "[%d] Junk in equest %u", pn->index, (unsigned)data_len);
+        uvsocks5_on_msg(1, "%4d Junk in equest %u", pn->index, (unsigned)data_len);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
     if ( s5_exec_cmd != err ) {
-        uvsocks5_on_msg(1, "[%d] Request error: %s", pn->index, s5_strerror((s5_err)err));
+        uvsocks5_on_msg(1, "%4d Request error: %s", pn->index, s5_strerror((s5_err)err));
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
     if ( s5_cmd_tcp_bind == parser->cmd ) {
         /* Not supported */
-        uvsocks5_on_msg(1, "[%d] Bind requests are not supported.", pn->index);
+        uvsocks5_on_msg(1, "%4d Bind requests are not supported.", pn->index);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
@@ -252,7 +252,7 @@ static int do_req_parse(PROXY_NODE *pn) {
     }
 
     if ( s5_cmd_tcp_connect != parser->cmd ) {
-        uvsocks5_on_msg(1, "[%d] Unknow s5 command %d.", pn->index, parser->cmd);
+        uvsocks5_on_msg(1, "%4d Unknow s5 command %d.", pn->index, parser->cmd);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
@@ -281,7 +281,7 @@ static int do_req_lookup(PROXY_NODE *pn) {
     outgoing = &pn->outgoing;
 
     if ( outgoing->result < 0 ) {
-        uvsocks5_on_msg(1, "[%d] Lookup Error For %s : %s",
+        uvsocks5_on_msg(1, "%4d Lookup Error For %s : %s",
                        pn->index,
                        outgoing->peer.host,
                        uv_strerror((int)outgoing->result));
@@ -316,7 +316,7 @@ static int do_req_connect_start(PROXY_NODE *pn) {
 
     err = conn_connect(outgoing);
     if ( err != 0 ) {
-        uvsocks5_on_msg(1, "[%d] Connect error: %s", pn->index, uv_strerror(err));
+        uvsocks5_on_msg(1, "%4d Connect error: %s", pn->index, uv_strerror(err));
         new_state = do_kill(pn);
     } else {
         new_state = s_req_connect;
@@ -342,7 +342,7 @@ static int do_req_connect(PROXY_NODE *pn) {
     if ( outgoing->result != 0 ) {
         uvsocks5_on_msg(
             1,
-            "[%d] Connect %s:%d error: %s",
+            "%4d Connect %s:%d error: %s",
             pn->index,
             outgoing->peer.host,
             outgoing->peer.port,
@@ -425,7 +425,7 @@ static int do_proxy(CONN *sender) {
     incoming = &sender->pn->incoming;
     outgoing = &sender->pn->outgoing;
 
-    if ( c_done == sender->rdstate && sender->result > 0 ) {
+    if ( c_done == sender->rdstate && sender->result >= 0 ) {
         action = uvsocks5_on_plain_stream(sender);
         switch (action) {
         case PASS:
@@ -433,6 +433,10 @@ static int do_proxy(CONN *sender) {
 
         case NEEDMORE:
         case REJECT:
+            BREAK_NOW;
+
+        case TERMINATE:
+            new_state = do_kill(incoming->pn);
             BREAK_NOW;
         default:
             UNREACHABLE();
@@ -461,7 +465,7 @@ int do_kill(PROXY_NODE *pn) {
         /* Wait for uncomplete operations */
         uvsocks5_on_msg(
             2,
-            "[%d] Waitting outstanding operation: %d [%s]",
+            "%4d Waitting outstanding operation: %d [%s]",
             pn->index, pn->outstanding, pn->link_info);
         new_state = s_kill;
         BREAK_NOW;
@@ -728,13 +732,13 @@ static void dgram_read_done_l(
     /* parse s5 packet */
     err = s5_parse_udp(&parser, &data_pos, &data_len);
     if ( s5_exec_cmd != err ) {
-        uvsocks5_on_msg(1, "[%d] S5 dgram parse error: %s",
+        uvsocks5_on_msg(1, "%4d S5 dgram parse error: %s",
                        dgraml->dn->pn->index, s5_strerror(err));
         BREAK_NOW;
     }
 
     if ( 0 == data_len ) {
-        uvsocks5_on_msg(1, "[%d] No dgram payload after parse",
+        uvsocks5_on_msg(1, "%4d No dgram payload after parse",
                        dgraml->dn->pn->index, s5_strerror(err));
         BREAK_NOW;
     }
@@ -745,7 +749,7 @@ static void dgram_read_done_l(
     /* TODO: Dgram client maybe send data to different addresses by the same socket */
     if ( dgramr->peer.port ) {
         if ( dgramr->peer.port != remote.port || 0 != strcmp(dgramr->peer.host, remote.host) ) {
-            uvsocks5_on_msg(1, "[%d] Dgram one to more detected", dgraml->dn->pn->index);
+            uvsocks5_on_msg(1, "%4d Dgram one to more detected", dgraml->dn->pn->index);
             BREAK_NOW;
         }
     } else {
@@ -765,7 +769,7 @@ static void dgram_read_done_l(
     } else {
         /* Assume that will no DGRAM from different address */
         if ( 0 != equal_sockaddr(addr, &dgraml->addr.addr) ) {
-            uvsocks5_on_msg(1, "[%d] Dgram from different local address", dgraml->dn->pn->index);
+            uvsocks5_on_msg(1, "%4d Dgram from different local address", dgraml->dn->pn->index);
             BREAK_NOW;
         }
     }

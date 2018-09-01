@@ -50,7 +50,8 @@ enum {
 enum {
     PASS,
     NEEDMORE,
-    REJECT
+    REJECT,
+    TERMINATE
 };
 
 typedef struct ADDRESS{
