@@ -71,6 +71,16 @@ typedef struct MEM_RANGE{
     size_t data_len;
 }MEM_RANGE;
 
+typedef void (*write_stream_out_callback)(void* param, int direct, int status, void *ctx);
+typedef struct IOCTL_PORT{
+    /* Interface for send data out */
+    int (*write_stream_out)(
+        MEM_RANGE *buf, int direct, void *stream_id,
+        write_stream_out_callback callback, void *param);
+
+    void (*stream_pause)(void *stream_id, int direct, int pause);
+}IOCTL_PORT;
+
 #endif
 
-#endif //TLS_FLAT_HDR_H
+#endif
