@@ -31,6 +31,20 @@
 extern "C" {
 #endif
 
+#define DEFAULT_S5_BIND_HOST            ("0.0.0.0")
+#define DEFAULT_S5_BIND_PORT            (10890)
+#define DEFAULT_S5_IDEL_TIMEOUT         (60 * 1000)
+
+#define MAX_S5_HDR_LEN                  (255 + 6)
+#define MAX_S5_TCP_PAYLOAD_LEN          (2048)
+#define MAX_S5_UDP_PAYLOAD_LEN          (512)
+
+#define S5_IPV4_UDP_SEND_HDR_LEN        10
+#define S5_IPV6_UDP_SEND_HDR_LEN        22
+
+#define MAX_S5_TCP_FRAME_LEN       (MAX_S5_TCP_PAYLOAD_LEN)
+#define MAX_S5_UDP_FRAME_LEN       (MAX_S5_UDP_PAYLOAD_LEN + MAX_S5_HDR_LEN)
+
 typedef struct UVSOCKS5_BASE_CONFIG{
     const char *bind_host;
     unsigned short bind_port;
