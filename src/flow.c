@@ -464,7 +464,7 @@ int do_kill(PROXY_NODE *pn) {
     if ( pn->outstanding != 0 ) {
         /* Wait for uncomplete operations */
         uvsocks5_on_msg(
-            2,
+            4,
             "%4d Waitting outstanding operation: %d [%s]",
             pn->index, pn->outstanding, pn->link_info);
         new_state = s_kill;
