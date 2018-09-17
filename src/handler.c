@@ -185,7 +185,7 @@ int uvsocks5_write_stream_out(
     pn = (PROXY_NODE*)stream_id;
     conn = STREAM_UP == direct ? &pn->outgoing : &pn->incoming;
 
-    ASSERT(conn->wrstate == c_stop || conn->wrstate == c_done);
+    ASSERT(c_stop == conn->wrstate || c_done == conn->wrstate);
     conn->wrstate = c_busy;
 
     buf_t = uv_buf_init(buf->data_base, (unsigned int)buf->data_len);
@@ -221,7 +221,7 @@ static void uvsocks5_write_stream_out_done(uv_write_t *req, int status) {
 
     conn = CONTAINER_OF(req, CONN, write_req);
     conn->pn->outstanding--;
-    ASSERT(conn->wrstate == c_busy);
+    ASSERT(c_busy == conn->wrstate);
     conn->wrstate = c_stop;
 
     direct = conn == &conn->pn->incoming ? STREAM_DOWN : STREAM_UP;

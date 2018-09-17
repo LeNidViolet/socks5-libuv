@@ -68,7 +68,7 @@ void do_next(CONN *sender) {
 
     pn = sender->pn;
 
-    ASSERT(pn->state != s_dead);
+    ASSERT(s_dead != pn->state);
     switch (pn->state) {
     case s_handshake:
         new_state = do_handshake(pn);
@@ -112,7 +112,7 @@ void do_next(CONN *sender) {
     }
     pn->state = new_state;
 
-    if ( pn->state == s_dead )
+    if ( s_dead == pn->state )
         do_clear(pn);
 }
 
@@ -132,8 +132,8 @@ static int do_handshake(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    ASSERT(incoming->rdstate == c_done);
-    ASSERT(incoming->wrstate == c_stop);
+    ASSERT(c_done == incoming->rdstate);
+    ASSERT(c_stop == incoming->wrstate);
     incoming->rdstate = c_stop;
 
     data_pos = (uint8_t *)incoming->us_buf.buf_base,
@@ -145,13 +145,13 @@ static int do_handshake(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    if ( data_len != 0 ) {
+    if ( 0 != data_len ) {
         uvsocks5_on_msg(1, "%4d Junk in equest %u", pn->index, (unsigned)data_len);
         new_state = do_kill(pn);
         BREAK_NOW;
     }
 
-    if ( err != s5_auth_select ) {
+    if ( s5_auth_select != err ) {
         new_state = do_kill(pn);
         BREAK_NOW;
     }
@@ -182,8 +182,8 @@ static int do_req_start(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_done);
+    ASSERT(c_stop == incoming->rdstate);
+    ASSERT(c_done == incoming->wrstate);
     incoming->wrstate = c_stop;
 
     conn_read(incoming);
@@ -211,10 +211,10 @@ static int do_req_parse(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    ASSERT(incoming->rdstate == c_done);
-    ASSERT(incoming->wrstate == c_stop);
-    ASSERT(outgoing->rdstate == c_stop);
-    ASSERT(outgoing->wrstate == c_stop);
+    ASSERT(c_done == incoming->rdstate);
+    ASSERT(c_stop == incoming->wrstate);
+    ASSERT(c_stop == outgoing->rdstate);
+    ASSERT(c_stop == outgoing->wrstate);
     incoming->rdstate = c_stop;
 
     parser = &pn->parser;
@@ -259,7 +259,7 @@ static int do_req_parse(PROXY_NODE *pn) {
 
     s5_addr_copy(parser, &outgoing->t.addr, &outgoing->peer);
 
-    if ( parser->atyp == s5_atyp_host ) {
+    if ( s5_atyp_host == parser->atyp ) {
         conn_getaddrinfo(outgoing, (const char *)parser->daddr);
         new_state = s_req_lookup;
         BREAK_NOW;
@@ -290,10 +290,10 @@ static int do_req_lookup(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_stop);
-    ASSERT(outgoing->rdstate == c_stop);
-    ASSERT(outgoing->wrstate == c_stop);
+    ASSERT(c_stop == incoming->rdstate);
+    ASSERT(c_stop == incoming->wrstate);
+    ASSERT(c_stop == outgoing->rdstate);
+    ASSERT(c_stop == outgoing->wrstate);
 
     ret = do_req_connect_start(pn);
 
@@ -309,10 +309,10 @@ static int do_req_connect_start(PROXY_NODE *pn) {
 
     incoming = &pn->incoming;
     outgoing = &pn->outgoing;
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_stop);
-    ASSERT(outgoing->rdstate == c_stop);
-    ASSERT(outgoing->wrstate == c_stop);
+    ASSERT(c_stop == incoming->rdstate);
+    ASSERT(c_stop == incoming->wrstate);
+    ASSERT(c_stop == outgoing->rdstate);
+    ASSERT(c_stop == outgoing->wrstate);
 
     err = conn_connect(outgoing);
     if ( err != 0 ) {
@@ -339,7 +339,7 @@ static int do_req_connect(PROXY_NODE *pn) {
     incoming = &pn->incoming;
     outgoing = &pn->outgoing;
 
-    if ( outgoing->result != 0 ) {
+    if ( 0 != outgoing->result ) {
         uvsocks5_on_msg(
             1,
             "%4d Connect %s:%d error: %s",
@@ -351,10 +351,10 @@ static int do_req_connect(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_stop);
-    ASSERT(outgoing->rdstate == c_stop);
-    ASSERT(outgoing->wrstate == c_stop);
+    ASSERT(c_stop == incoming->rdstate);
+    ASSERT(c_stop == incoming->wrstate);
+    ASSERT(c_stop == outgoing->rdstate);
+    ASSERT(c_stop == outgoing->wrstate);
 
     uvsocks5_on_connection_made(pn);
 
@@ -372,9 +372,9 @@ static int do_req_connect(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    if (addrlen == sizeof(struct sockaddr_in)) {
+    if ( addrlen == sizeof(struct sockaddr_in) ) {
         conn_write(incoming, ipv4_reply, 10);
-    } else if (addrlen == sizeof(struct sockaddr_in6)) {
+    } else if ( addrlen == sizeof(struct sockaddr_in6) ) {
         conn_write(incoming, ipv6_reply, 22);
     } else {
         UNREACHABLE();
@@ -400,10 +400,10 @@ static int do_proxy_start(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_done);
-    ASSERT(outgoing->rdstate == c_stop);
-    ASSERT(outgoing->wrstate == c_stop);
+    ASSERT(c_stop == incoming->rdstate);
+    ASSERT(c_done == incoming->wrstate);
+    ASSERT(c_stop == outgoing->rdstate);
+    ASSERT(c_stop == outgoing->wrstate);
     incoming->wrstate = c_stop;
 
     conn_read(incoming);
@@ -461,7 +461,7 @@ BREAK_LABEL:
 int do_kill(PROXY_NODE *pn) {
     int new_state;
 
-    if ( pn->outstanding != 0 ) {
+    if ( 0 != pn->outstanding ) {
         /* Wait for uncomplete operations */
         uvsocks5_on_msg(
             4,
@@ -549,8 +549,8 @@ static int do_dgram_response(PROXY_NODE *pn) {
         (struct sockaddr *)&s,
         &addr_len));
 
-    if ( s.addr.sa_family == AF_INET ) s.addr4.sin_port = 0;
-    if ( s.addr.sa_family == AF_INET6 ) s.addr6.sin6_port = 0;
+    if ( AF_INET == s.addr.sa_family ) s.addr4.sin_port = 0;
+    if ( AF_INET6 == s.addr.sa_family ) s.addr6.sin6_port = 0;
 
     /* Random choice a port */
     CHECK(0 == uv_udp_bind(&dn->incoming.handle.udp, &s.addr, 0));
@@ -604,8 +604,8 @@ static int do_dgram_start(PROXY_NODE *pn) {
         BREAK_NOW;
     }
 
-    ASSERT(incoming->rdstate == c_stop);
-    ASSERT(incoming->wrstate == c_done);
+    ASSERT(c_stop == incoming->rdstate);
+    ASSERT(c_done == incoming->wrstate);
     incoming->wrstate = c_stop;
 
     /* Wait EOF */
@@ -626,7 +626,7 @@ static int do_dgram_stop(PROXY_NODE *pn) {
 
     incoming = &pn->incoming;
 
-    ASSERT(incoming->wrstate == c_stop);
+    ASSERT(c_stop == incoming->wrstate);
     incoming->rdstate = c_stop;
 
     /* It should be EOF or read error or timer expire */
@@ -713,14 +713,8 @@ static void dgram_read_done_l(
 
     (void)flags;
 
-    if ( nread == 0 ) {
+    if ( nread <= 0 )
         BREAK_NOW;
-    }
-
-    if ( nread < 0 ) {
-        uvsocks5_on_msg(1, "Dgram read failed(local): %s", uv_strerror((int)nread));
-        BREAK_NOW;
-    }
 
     dgraml = uv_handle_get_data((uv_handle_t*)handle);
     ASSERT(dgraml->us_buf.buf_base == buf->base);
@@ -782,7 +776,7 @@ static void dgram_read_done_l(
     uvsocks5_on_plain_dgram(&dgraml->us_buf, STREAM_UP, dgramr->ctx);
 
     if ( 0 == dgramr->addr.addr.sa_family ) {
-        if ( parser.atyp == s5_atyp_host ) {
+        if ( s5_atyp_host == parser.atyp ) {
 
             /* Lookup dns cache */
             dnsc = dnsc_find(remote.host);
@@ -831,26 +825,20 @@ static void dgram_read_done_r(
 
     (void)flags;
 
-    if ( nread == 0 ) {
+    if ( nread <= 0 )
         BREAK_NOW;
-    }
-
-    if ( nread < 0 ) {
-        uvsocks5_on_msg(1, "Dgram read failed(remote): %s", uv_strerror((int)nread));
-        BREAK_NOW;
-    }
 
     dgramr = uv_handle_get_data((uv_handle_t*)handle);
     ASSERT(dgramr->us_buf.buf_base == buf->base);
 
     /* Address check */
     ASSERT(addr->sa_family == dgramr->addr.addr.sa_family);
-    if ( addr->sa_family == AF_INET ) {
+    if ( AF_INET == addr->sa_family ) {
         in = (struct sockaddr_in*)addr;
         ASSERT(in->sin_port == dgramr->addr.addr4.sin_port);
         ASSERT(0 == memcmp(&in->sin_addr, &dgramr->addr.addr4.sin_addr, sizeof(in->sin_addr)));
     }
-    else if ( addr->sa_family == AF_INET6 ) {
+    else if ( AF_INET6 == addr->sa_family ) {
         in6 = (struct sockaddr_in6*)addr;
         ASSERT(in6->sin6_port == dgramr->addr.addr6.sin6_port);
         ASSERT(0 == memcmp(&in6->sin6_addr, &dgramr->addr.addr6.sin6_addr, sizeof(in6->sin6_addr)));
@@ -876,13 +864,13 @@ static void dgram_read_done_r(
     *p++ = addr->sa_family == AF_INET ? (char)'\1' : (char)'\4';
 
     /* Write server ip && port to s5 hdr */
-    if ( addr->sa_family == AF_INET ) {
+    if ( AF_INET == addr->sa_family ) {
         in = (struct sockaddr_in*)addr;
         memcpy(p, &in->sin_addr, sizeof(in->sin_addr));
         p += sizeof(in->sin_addr);
         memcpy(p, &in->sin_port, sizeof(in->sin_port));
     }
-    else if ( addr->sa_family == AF_INET6 ) {
+    else if ( AF_INET6 == addr->sa_family ) {
         in6 = (struct sockaddr_in6*)addr;
         memcpy(p, &in6->sin6_addr, sizeof(in6->sin6_addr));
         p += sizeof(in6->sin6_addr);
@@ -908,7 +896,7 @@ static void dgram_getaddrinfo_done(
     dgramr = CONTAINER_OF(req, DGRAM_REMOTE, req_dns);
     dgraml = &dgramr->dn->incoming;
 
-    if ( status == 0 ) {
+    if ( 0 == status ) {
         cpy_sockaddr(addrs->ai_addr, &dgramr->addr.addr);
         set_sockaddr_port(&dgramr->addr.addr, ntohs_u(dgramr->peer.port));
 

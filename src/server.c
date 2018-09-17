@@ -131,7 +131,7 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
 
     naddrs = 0;
     for ( ai = addrs; ai != NULL; ai = ai->ai_next ) {
-        if ( ai->ai_family == AF_INET || ai->ai_family == AF_INET6 ) {
+        if ( AF_INET == ai->ai_family || AF_INET6 == ai->ai_family ) {
             naddrs++;
         }
     }
@@ -139,16 +139,16 @@ static void do_bind(uv_getaddrinfo_t *req, int status, struct addrinfo *addrs) {
 
     port = uvsocks5_ctx.config.bind_port;
     for ( ai = addrs; ai != NULL; ai = ai->ai_next ) {
-        if ( ai->ai_family != AF_INET && ai->ai_family != AF_INET6 ) {
+        if ( AF_INET != ai->ai_family && AF_INET6 != ai->ai_family ) {
             continue;
         }
 
-        if ( ai->ai_family == AF_INET ) {
+        if ( AF_INET == ai->ai_family ) {
             s.addr4 = *(const struct sockaddr_in *)ai->ai_addr;
             s.addr4.sin_port = htons_u(port);
             addrv = &s.addr4.sin_addr;
         }
-        else if ( ai->ai_family == AF_INET6 ) {
+        else if ( AF_INET6 == ai->ai_family ) {
             s.addr6 = *(const struct sockaddr_in6 *)ai->ai_addr;
             s.addr6.sin6_port = htons_u(port);
             addrv = &s.addr6.sin6_addr;
@@ -264,8 +264,8 @@ BREAK_LABEL:
 int conn_connect(CONN *conn) {
     int ret;
 
-    ASSERT(conn->t.addr.sa_family == AF_INET ||
-           conn->t.addr.sa_family == AF_INET6);
+    ASSERT(AF_INET == conn->t.addr.sa_family ||
+           AF_INET6 == conn->t.addr.sa_family);
 
     ret = uv_tcp_connect(&conn->t.connect_req,
                          &conn->handle.tcp,
@@ -301,7 +301,7 @@ static void conn_alloc(uv_handle_t *handle, size_t size, uv_buf_t *buf) {
 }
 
 void conn_read(CONN *conn) {
-    ASSERT(conn->rdstate == c_stop);
+    ASSERT(c_stop == conn->rdstate);
 
     if( 0 != uv_read_start(
         &conn->handle.stream,
@@ -324,7 +324,7 @@ static void conn_read_done(uv_stream_t *handle, ssize_t nread, const uv_buf_t *b
 
     conn = uv_handle_get_data((uv_handle_t*)handle);
     ASSERT(conn->us_buf.buf_base == buf->base);
-    ASSERT(conn->rdstate == c_busy);
+    ASSERT(c_busy == conn->rdstate);
     conn->rdstate = c_done;
     conn->result = nread;
 
@@ -335,7 +335,7 @@ static void conn_read_done(uv_stream_t *handle, ssize_t nread, const uv_buf_t *b
 void conn_write(CONN *conn, const void *data, unsigned int len) {
     uv_buf_t buf;
 
-    ASSERT(conn->wrstate == c_stop || conn->wrstate == c_done);
+    ASSERT(c_stop == conn->wrstate || c_done == conn->wrstate);
     conn->wrstate = c_busy;
 
     buf = uv_buf_init((char*)data, len);
@@ -361,7 +361,7 @@ static void conn_write_done(uv_write_t *req, int status) {
 
     conn = CONTAINER_OF(req, CONN, write_req);
     conn->pn->outstanding--;
-    ASSERT(conn->wrstate == c_busy);
+    ASSERT(c_busy == conn->wrstate);
     conn->wrstate = c_done;
     conn->result = status;
 
@@ -392,11 +392,11 @@ static void conn_getaddrinfo_done(
     conn = CONTAINER_OF(req, CONN, t.addrinfo_req);
     conn->result = status;
 
-    if (status == 0) {
+    if ( 0 == status ) {
         /* FIXME(bnoordhuis) Should try all addresses. */
-        if (ai->ai_family == AF_INET) {
+        if ( AF_INET == ai->ai_family ) {
             conn->t.addr4 = *(const struct sockaddr_in *) ai->ai_addr;
-        } else if (ai->ai_family == AF_INET6) {
+        } else if ( AF_INET6 == ai->ai_family ) {
             conn->t.addr6 = *(const struct sockaddr_in6 *) ai->ai_addr;
         } else {
             UNREACHABLE();
@@ -411,8 +411,8 @@ static void conn_getaddrinfo_done(
 }
 
 void conn_close(CONN *conn) {
-    ASSERT(conn->rdstate != c_dead);
-    ASSERT(conn->wrstate != c_dead);
+    ASSERT(c_dead != conn->rdstate);
+    ASSERT(c_dead != conn->wrstate);
     conn->rdstate = c_dead;
     conn->wrstate = c_dead;
     uv_handle_set_data((uv_handle_t*)&conn->timer_handle, conn);
@@ -438,7 +438,7 @@ void conn_timer_reset(CONN *conn) {
 
 int conn_cycle(const char *who, CONN *recver, CONN *sender) {
     if ( recver->result < 0 ) {
-        if ( recver->result != UV_EOF ) {
+        if ( UV_EOF != recver->result ) {
             uvsocks5_on_msg(
                 1,
                 "%4d %s error: %s [%s]",
@@ -455,7 +455,7 @@ int conn_cycle(const char *who, CONN *recver, CONN *sender) {
         return -1;
     }
 
-    if ( recver->wrstate == c_done ) {
+    if ( c_done == recver->wrstate ) {
         recver->wrstate = c_stop;
     }
 
@@ -463,11 +463,11 @@ int conn_cycle(const char *who, CONN *recver, CONN *sender) {
      * read.  That gives us back-pressure handling for free because if the peer
      * sends data faster than we consume it, TCP congestion control kicks in.
      */
-    if ( recver->wrstate == c_stop ) {
-        if ( sender->rdstate == c_stop ) {
+    if ( c_stop == recver->wrstate ) {
+        if ( c_stop == sender->rdstate ) {
             conn_read(sender);
         }
-        else if ( sender->rdstate == c_done ) {
+        else if ( c_done == sender->rdstate ) {
             conn_write(recver, sender->us_buf.buf_base, (unsigned int)sender->result);
             sender->rdstate = c_stop;  /* Triggers the call to conn_read() above. */
         }
