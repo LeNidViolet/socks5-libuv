@@ -112,7 +112,7 @@ void on_dgram_teardown(void *ctx) {
     free(ds);
 }
 
-void on_plain_stream(MEM_RANGE *buf, int direct, void *ctx) {
+int on_plain_stream(MEM_RANGE *buf, int direct, void *ctx) {
     STREAM_SESSION *ss;
     char *desc = direct == STREAM_UP ? "==>" : "<==";
 
@@ -121,6 +121,8 @@ void on_plain_stream(MEM_RANGE *buf, int direct, void *ctx) {
     (void)ss;
     (void)desc;
     (void)buf;
+
+    return PASS;
 }
 
 void on_plain_dgram(MEM_RANGE *buf, int direct, void *ctx) {
@@ -148,6 +150,9 @@ int main(int argc, char **argv) {
 
     ctx.callbacks.on_plain_stream = on_plain_stream;
     ctx.callbacks.on_plain_dgram = on_plain_dgram;
+
+    ctx.config.bind_host = "127.0.0.1";
+    ctx.config.bind_port = 1080;
 
     uvsocks5_server_launch(&ctx);
 
