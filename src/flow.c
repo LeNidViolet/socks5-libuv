@@ -507,6 +507,10 @@ static int do_clear(PROXY_NODE *pn) {
     free(pn);
 
     pn_outstanding--;
+    if ( 0 == pn_outstanding )
+        uvsocks5_on_msg(
+            4,
+            "Tcp Outstanding Operation downto 0");
 
     return 0;
 }
@@ -1030,5 +1034,9 @@ static void dgram_close_done(uv_handle_t* handle) {
         free(dn);
 
         dn_outstanding--;
+        if ( 0 == dn_outstanding )
+            uvsocks5_on_msg(
+                4,
+                "Udp Outstanding Operation downto 0");
     }
 }

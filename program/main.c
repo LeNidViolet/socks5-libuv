@@ -36,7 +36,7 @@ typedef struct {
 } DGRAM_SESSION;
 
 void on_msg(int level, const char *msg) {
-    printf("%d %s\n", level, msg);
+    printf("====LV[%d] MSG[%s]====\n", level, msg);
 }
 
 void on_bind(const char *host, unsigned short port) {
@@ -51,7 +51,7 @@ void on_stream_connection_made(ADDRESS_PAIR *addr, void *ctx) {
     ss->local = *addr->local;
     ss->remote = *addr->remote;
 
-    printf("[%d] CONNECTION MADE %s:%d -> %s:%d\n",
+    printf("[%04d] CONNECTION MADE %s:%d -> %s:%d\n",
         ss->index,
         addr->local->host, addr->local->port,
         addr->remote->host, addr->remote->port);
@@ -76,7 +76,8 @@ void on_stream_teardown(void *ctx) {
 
     ss = (STREAM_SESSION*)ctx;
 
-    printf("CONNECTION LOST %s:%d -> %s:%d\n",
+    printf("[%04d] CONNECTION LOST %s:%d -> %s:%d\n",
+           ss->index,
            ss->local.host, ss->local.port,
            ss->remote.host, ss->remote.port);
     free(ss);
@@ -93,7 +94,7 @@ void on_new_dgram(ADDRESS_PAIR *addr, void **ctx) {
     ds->local = *addr->local;
     ds->remote = *addr->remote;
 
-    printf("[%d] DGRAM MADE %s:%d -> %s:%d\n",
+    printf("[%04d] DGRAM MADE %s:%d -> %s:%d\n",
            ds->index,
            addr->local->host, addr->local->port,
            addr->remote->host, addr->remote->port);
@@ -106,7 +107,8 @@ void on_dgram_teardown(void *ctx) {
 
     ds = (DGRAM_SESSION*)ctx;
 
-    printf("DGRAM LOST %s:%d -> %s:%d\n",
+    printf("[%04d] DGRAM LOST %s:%d -> %s:%d\n",
+           ds->index,
            ds->local.host, ds->local.port,
            ds->remote.host, ds->remote.port);
     free(ds);
